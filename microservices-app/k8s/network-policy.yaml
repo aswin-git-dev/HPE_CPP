@@ -1,0 +1,83 @@
+# ─── NetworkPolicy ─────────────────────────────────────────────────────────────
+# Default-deny all ingress/egress, then explicitly allow only required traffic.
+# This implements zero-trust networking within the ecommerce namespace.
+
+# 1. Default Deny All Ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: ecommerce
+spec:
+  podSelector: {}       # Applies to ALL pods in namespace
+  policyTypes:
+    - Ingress
+
+---
+# 2. Allow ingress to user-service from: ingress-controller + same namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-user-service
+  namespace: ecommerce
+spec:
+  podSelector:
+    matchLabels:
+      app: user-service
+  policyTypes:
+    - Ingress
+  ingress:
+    # From NGINX ingress controller (namespace: ingress-nginx)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+    # From any pod in the ecommerce namespace (inter-service calls)
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8000
+
+---
+# 3. Allow ingress to MongoDB only from within the ecommerce namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-mongodb
+  namespace: ecommerce
+spec:
+  podSelector:
+    matchLabels:
+      app: mongodb
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}    # Only from pods inside ecommerce namespace
+      ports:
+        - protocol: TCP
+          port: 27017
+
+---
+# 4. Allow stub services to receive ingress from inside the namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-stub-services
+  namespace: ecommerce
+spec:
+  podSelector:
+    matchLabels:
+      tier: backend          # Matches all backend services
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx

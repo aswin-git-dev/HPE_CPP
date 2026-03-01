@@ -1,0 +1,39 @@
+# ─── MongoDB Service (ClusterIP + Headless) ────────────────────────────────────
+# ClusterIP: for application connections
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-service
+  namespace: ecommerce
+  labels:
+    app: mongodb
+    tier: database
+spec:
+  type: ClusterIP
+  selector:
+    app: mongodb
+  ports:
+    - name: mongo
+      protocol: TCP
+      port: 27017
+      targetPort: 27017
+
+---
+# Headless service: for direct pod DNS resolution (useful for replica sets)
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-headless
+  namespace: ecommerce
+  labels:
+    app: mongodb
+    tier: database
+spec:
+  clusterIP: None        # Headless
+  selector:
+    app: mongodb
+  ports:
+    - name: mongo
+      protocol: TCP
+      port: 27017
+      targetPort: 27017

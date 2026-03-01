@@ -1,0 +1,41 @@
+# ─── Persistent Volume for MongoDB (user-service) ─────────────────────────────
+# Uses hostPath for local/kubeadm clusters.
+# For cloud clusters (GKE/EKS/AKS), replace with a StorageClass PVC.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mongo-pv
+  namespace: ecommerce
+  labels:
+    app: mongodb
+    tier: database
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: manual
+  hostPath:
+    # Each node that could host MongoDB must have this path pre-created.
+    # In a multi-node setup, pin MongoDB to a specific node via nodeSelector.
+    path: "/data/mongodb/userdb"
+    type: DirectoryOrCreate
+
+---
+# ─── Persistent Volume Claim ──────────────────────────────────────────────────
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongo-pvc
+  namespace: ecommerce
+  labels:
+    app: mongodb
+    tier: database
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: manual
+  resources:
+    requests:
+      storage: 5Gi

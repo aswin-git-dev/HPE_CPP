@@ -1,0 +1,67 @@
+# ─── PodDisruptionBudget for user-service ──────────────────────────────────────
+# Ensures at least 1 user-service pod is always available during node
+# maintenance, rolling updates, or cluster upgrades.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: user-service-pdb
+  namespace: ecommerce
+  labels:
+    app: user-service
+spec:
+  minAvailable: 1       # Always keep at least 1 pod alive
+  selector:
+    matchLabels:
+      app: user-service
+
+---
+# ─── PodDisruptionBudget for product-service ──────────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: product-service-pdb
+  namespace: ecommerce
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: product-service
+
+---
+# ─── PodDisruptionBudget for order-service ────────────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: order-service-pdb
+  namespace: ecommerce
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: order-service
+
+---
+# ─── PodDisruptionBudget for payment-service ──────────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: payment-service-pdb
+  namespace: ecommerce
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: payment-service
+
+---
+# ─── PodDisruptionBudget for notification-service ─────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: notification-service-pdb
+  namespace: ecommerce
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: notification-service

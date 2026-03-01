@@ -1,0 +1,109 @@
+# ─── docker-compose.yaml ───────────────────────────────────────────────────────
+# Local development and testing. Mirrors the Kubernetes setup.
+# Usage: docker-compose up --build
+# ─────────────────────────────────────────────────────────────────────────────
+version: "3.9"
+
+networks:
+  ecommerce-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  mongo-data:
+    driver: local
+
+services:
+  # ── MongoDB (user-service dedicated DB) ───────────────────────────────────
+  mongodb:
+    image: mongo:6.0
+    container_name: mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: userdb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - ecommerce-net
+    healthcheck:
+      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  # ── User Service (Full Implementation) ────────────────────────────────────
+  user-service:
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    container_name: user-service
+    restart: unless-stopped
+    environment:
+      MONGO_URL: "mongodb://mongodb:27017"
+      DB_NAME: "userdb"
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - ecommerce-net
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ── Product Service (Stub) ────────────────────────────────────────────────
+  product-service:
+    build:
+      context: ./product-service
+      dockerfile: Dockerfile
+    container_name: product-service
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    networks:
+      - ecommerce-net
+
+  # ── Order Service (Stub) ──────────────────────────────────────────────────
+  order-service:
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
+    container_name: order-service
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    networks:
+      - ecommerce-net
+
+  # ── Payment Service (Stub) ────────────────────────────────────────────────
+  payment-service:
+    build:
+      context: ./payment-service
+      dockerfile: Dockerfile
+    container_name: payment-service
+    restart: unless-stopped
+    ports:
+      - "8003:8003"
+    networks:
+      - ecommerce-net
+
+  # ── Notification Service (Stub) ───────────────────────────────────────────
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: notification-service
+    restart: unless-stopped
+    ports:
+      - "8004:8004"
+    networks:
+      - ecommerce-net

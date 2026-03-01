@@ -1,0 +1,10 @@
+# ─── Namespace ────────────────────────────────────────────────────────────────
+# All ecommerce microservices run in this namespace for isolation.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ecommerce
+  labels:
+    name: ecommerce
+    project: ecommerce-platform
+    managed-by: kubectl

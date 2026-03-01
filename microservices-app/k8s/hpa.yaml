@@ -1,0 +1,44 @@
+# ─── HorizontalPodAutoscaler ────────────────────────────────────────────────────
+# Scales user-service pods from 3 to 10 when CPU >= 70% or Memory >= 80%
+# Requires metrics-server to be installed in the cluster.
+# Install: kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: user-service-hpa
+  namespace: ecommerce
+  labels:
+    app: user-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: user-service
+  minReplicas: 3      # Minimum 3 pods (1 per node in 3-node cluster)
+  maxReplicas: 10     # Scale up to 10 pods across nodes
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70    # Scale when CPU > 70%
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80    # Scale when Memory > 80%
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60     # Wait 60s before scaling up
+      policies:
+        - type: Pods
+          value: 2                       # Add max 2 pods at a time
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300    # Wait 5 min before scaling down
+      policies:
+        - type: Pods
+          value: 1                       # Remove max 1 pod at a time
+          periodSeconds: 60

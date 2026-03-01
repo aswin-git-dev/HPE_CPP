@@ -1,0 +1,73 @@
+# ─── Ingress (NGINX) ───────────────────────────────────────────────────────────
+# Routes external traffic to services based on path prefix.
+# Requires nginx ingress controller:
+#   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.0/deploy/static/provider/cloud/deploy.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ecommerce-ingress
+  namespace: ecommerce
+  labels:
+    app: ecommerce-platform
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    # Rate limiting to protect services
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: ecommerce.local     # Change to your actual domain / use IP for local
+      http:
+        paths:
+          # ── User Service (Full) ──────────────────────────────────────
+          - path: /users(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: user-service
+                port:
+                  number: 80
+          # ── Dashboard Root ───────────────────────────────────────────
+          - path: /()(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: user-service
+                port:
+                  number: 80
+          # ── Product Service (Stub) ───────────────────────────────────
+          - path: /products(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: product-service
+                port:
+                  number: 80
+          # ── Order Service (Stub) ─────────────────────────────────────
+          - path: /orders(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: order-service
+                port:
+                  number: 80
+          # ── Payment Service (Stub) ───────────────────────────────────
+          - path: /payments(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: payment-service
+                port:
+                  number: 80
+          # ── Notification Service (Stub) ──────────────────────────────
+          - path: /notifications(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: notification-service
+                port:
+                  number: 80

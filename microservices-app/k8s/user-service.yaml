@@ -1,0 +1,18 @@
+# ─── User Service — Kubernetes Service ────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+  namespace: ecommerce
+  labels:
+    app: user-service
+    tier: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: user-service
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80            # Internal cluster port
+      targetPort: 8000    # Container port
