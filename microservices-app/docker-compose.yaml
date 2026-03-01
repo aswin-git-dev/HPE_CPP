@@ -2,8 +2,6 @@
 # Local development and testing. Mirrors the Kubernetes setup.
 # Usage: docker-compose up --build
 # ─────────────────────────────────────────────────────────────────────────────
-version: "3.9"
-
 networks:
   ecommerce-net:
     driver: bridge

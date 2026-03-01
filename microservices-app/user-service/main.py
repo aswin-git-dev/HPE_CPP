@@ -79,47 +79,52 @@ def valid_object_id(oid: str) -> ObjectId:
 # ──────────────────────────────────────────────
 HTML_STYLE = """
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+    font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #f0f4ff;
     min-height: 100vh;
-    color: #e0e0e0;
+    color: #1e3a5f;
   }
   header {
-    background: rgba(255,255,255,0.05);
-    backdrop-filter: blur(10px);
-    border-bottom: 1px solid rgba(255,255,255,0.1);
+    background: linear-gradient(135deg, #1d4ed8, #2563eb);
+    border-bottom: 1px solid #1e40af;
     padding: 18px 40px;
     display: flex;
     align-items: center;
     gap: 16px;
+    box-shadow: 0 2px 12px rgba(29,78,216,0.25);
   }
   header .logo { font-size: 2rem; }
-  header h1 { font-size: 1.6rem; font-weight: 700; color: #a78bfa; }
-  header span { font-size: 0.85rem; color: #94a3b8; }
+  header h1 { font-size: 1.6rem; font-weight: 700; color: #ffffff; }
+  header span { font-size: 0.85rem; color: #bfdbfe; }
   .container { max-width: 1200px; margin: 0 auto; padding: 32px 20px; }
   .stats-bar {
     display: flex; gap: 16px; margin-bottom: 32px; flex-wrap: wrap;
   }
   .stat-card {
-    background: rgba(255,255,255,0.07);
-    border: 1px solid rgba(167,139,250,0.3);
+    background: #ffffff;
+    border: 1px solid #bfdbfe;
     border-radius: 12px;
     padding: 18px 28px;
     flex: 1; min-width: 160px;
     text-align: center;
+    box-shadow: 0 2px 8px rgba(29,78,216,0.08);
+    transition: transform 0.2s, box-shadow 0.2s;
   }
-  .stat-card .num { font-size: 2rem; font-weight: 800; color: #a78bfa; }
-  .stat-card .lbl { font-size: 0.8rem; color: #94a3b8; margin-top: 4px; }
+  .stat-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(29,78,216,0.14); }
+  .stat-card .num { font-size: 2rem; font-weight: 800; color: #1d4ed8; }
+  .stat-card .lbl { font-size: 0.8rem; color: #3b82f6; margin-top: 4px; font-weight: 500; }
   .panel {
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.1);
+    background: #ffffff;
+    border: 1px solid #bfdbfe;
     border-radius: 16px;
     padding: 28px;
     margin-bottom: 28px;
+    box-shadow: 0 2px 10px rgba(29,78,216,0.07);
   }
-  .panel h2 { font-size: 1.1rem; color: #a78bfa; margin-bottom: 20px; }
+  .panel h2 { font-size: 1.1rem; color: #1d4ed8; margin-bottom: 20px; font-weight: 700; }
   form.create-form {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -130,16 +135,19 @@ HTML_STYLE = """
     width: 100%;
     padding: 10px 14px;
     border-radius: 8px;
-    border: 1px solid rgba(167,139,250,0.4);
-    background: rgba(255,255,255,0.07);
-    color: #e0e0e0;
+    border: 1px solid #93c5fd;
+    background: #f8faff;
+    color: #1e3a5f;
     font-size: 0.9rem;
     outline: none;
-    transition: border 0.2s;
+    transition: border 0.2s, box-shadow 0.2s;
   }
-  input:focus, select:focus { border-color: #a78bfa; }
-  input::placeholder { color: #64748b; }
-  label { font-size: 0.8rem; color: #94a3b8; display: block; margin-bottom: 4px; }
+  input:focus, select:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.15);
+  }
+  input::placeholder { color: #93c5fd; }
+  label { font-size: 0.8rem; color: #2563eb; display: block; margin-bottom: 4px; font-weight: 600; }
   .btn {
     padding: 10px 22px;
     border: none;
@@ -150,25 +158,27 @@ HTML_STYLE = """
     transition: all 0.2s;
   }
   .btn-primary {
-    background: linear-gradient(135deg, #7c3aed, #a78bfa);
-    color: #fff;
+    background: linear-gradient(135deg, #1d4ed8, #3b82f6);
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(29,78,216,0.3);
   }
-  .btn-primary:hover { opacity: 0.88; transform: translateY(-1px); }
+  .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 4px 14px rgba(29,78,216,0.4); }
   .btn-danger { background: #dc2626; color: #fff; }
   .btn-danger:hover { opacity: 0.85; }
   .btn-sm { padding: 6px 14px; font-size: 0.8rem; }
   table { width: 100%; border-collapse: collapse; }
   th {
-    background: rgba(124,58,237,0.3);
+    background: #dbeafe;
     padding: 12px 16px;
     text-align: left;
     font-size: 0.8rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #a78bfa;
+    color: #1d4ed8;
+    font-weight: 700;
   }
-  td { padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 0.88rem; }
-  tr:hover td { background: rgba(255,255,255,0.04); }
+  td { padding: 12px 16px; border-bottom: 1px solid #e0eaff; font-size: 0.88rem; color: #1e3a5f; }
+  tr:hover td { background: #eff6ff; }
   .badge {
     display: inline-block;
     padding: 3px 10px;
@@ -176,26 +186,28 @@ HTML_STYLE = """
     font-size: 0.75rem;
     font-weight: 600;
   }
-  .badge-admin { background: rgba(220,38,38,0.2); color: #f87171; }
-  .badge-customer { background: rgba(124,58,237,0.2); color: #a78bfa; }
-  .badge-vendor { background: rgba(234,179,8,0.2); color: #fbbf24; }
-  .empty-state { text-align: center; padding: 40px; color: #64748b; }
+  .badge-admin    { background: #fee2e2; color: #dc2626; }
+  .badge-customer { background: #dbeafe; color: #1d4ed8; }
+  .badge-vendor   { background: #fef3c7; color: #b45309; }
+  .empty-state { text-align: center; padding: 40px; color: #93c5fd; }
   .alert { padding: 12px 20px; border-radius: 8px; margin-bottom: 20px; font-size: 0.9rem; }
-  .alert-success { background: rgba(16,185,129,0.15); border: 1px solid #10b981; color: #6ee7b7; }
-  .alert-error   { background: rgba(220,38,38,0.15);  border: 1px solid #dc2626; color: #fca5a5; }
+  .alert-success { background: #dcfce7; border: 1px solid #16a34a; color: #15803d; }
+  .alert-error   { background: #fee2e2; border: 1px solid #dc2626; color: #b91c1c; }
   .services-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px,1fr)); gap: 14px; }
   .svc-card {
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.1);
+    background: #f8faff;
+    border: 1px solid #bfdbfe;
     border-radius: 12px;
     padding: 18px;
     text-align: center;
+    transition: box-shadow 0.2s;
   }
+  .svc-card:hover { box-shadow: 0 4px 14px rgba(29,78,216,0.12); }
   .svc-card .icon { font-size: 2rem; margin-bottom: 8px; }
-  .svc-card .name { font-size: 0.9rem; font-weight: 600; color: #e0e0e0; }
-  .svc-card .status { font-size: 0.75rem; color: #94a3b8; margin-top: 4px; }
+  .svc-card .name { font-size: 0.9rem; font-weight: 600; color: #1d4ed8; }
+  .svc-card .status { font-size: 0.75rem; color: #3b82f6; margin-top: 4px; }
   .svc-card .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; }
-  .dot-active { background:#10b981; } .dot-stub { background:#fbbf24; }
+  .dot-active { background:#16a34a; } .dot-stub { background:#f59e0b; }
 </style>
 """
 
@@ -350,9 +362,9 @@ async def dashboard(request: Request, msg: str = "", err: str = ""):
 
     <div class="panel">
       <h2>📡 API Reference</h2>
-      <p style="color:#94a3b8;font-size:0.88rem;margin-bottom:12px">
-        Full REST API available — <a href="/docs" style="color:#a78bfa">Interactive Docs (Swagger)</a> &nbsp;|&nbsp;
-        <a href="/redoc" style="color:#a78bfa">ReDoc</a>
+      <p style="color:#2563eb;font-size:0.88rem;margin-bottom:12px">
+        Full REST API available — <a href="/docs" style="color:#1d4ed8;font-weight:600">Interactive Docs (Swagger)</a> &nbsp;|&nbsp;
+        <a href="/redoc" style="color:#1d4ed8;font-weight:600">ReDoc</a>
       </p>
       <table>
         <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
@@ -409,7 +421,7 @@ async def edit_page(user_id: str):
         <div class="full" style="display:flex;gap:12px">
           <button class="btn btn-primary" type="submit">💾 Save Changes</button>
           <a href="/"><button class="btn" type="button"
-             style="background:rgba(255,255,255,0.1);color:#e0e0e0">Cancel</button></a>
+             style="background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd">Cancel</button></a>
         </div>
       </form>
     </div>"""
