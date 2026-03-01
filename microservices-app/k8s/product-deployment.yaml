@@ -49,6 +49,11 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8001
+          env:
+            - name: MONGO_URL
+              value: "mongodb://mongodb-service.ecommerce.svc.cluster.local:27017"
+            - name: DB_NAME
+              value: "productdb"
           resources:
             requests:
               cpu: "50m"
