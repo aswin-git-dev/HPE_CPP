@@ -117,14 +117,26 @@ services:
     networks:
       - ecommerce-net
 
-  # ── Notification Service (Stub) ───────────────────────────────────────────
+  # ── Notification Service ───────────────────────────────────────────
   notification-service:
     build:
       context: ./notification-service
       dockerfile: Dockerfile
     container_name: notification-service
     restart: unless-stopped
+    environment:
+      MONGO_URI: "mongodb://mongodb:27017"
+      DB_NAME: "notification_db"
     ports:
       - "8004:8004"
+    depends_on:
+      mongodb:
+        condition: service_healthy
     networks:
       - ecommerce-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
