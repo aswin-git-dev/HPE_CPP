@@ -86,13 +86,24 @@ services:
   order-service:
     build:
       context: ./order-service
-      dockerfile: Dockerfile
     container_name: order-service
     restart: unless-stopped
+    environment:
+      MONGO_URL: "mongodb://mongodb:27017"
+      DB_NAME: "orderdb"
     ports:
       - "8002:8002"
+    depends_on:
+      mongodb:
+        condition: service_healthy
     networks:
       - ecommerce-net
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   # ── Payment Service (Stub) ────────────────────────────────────────────────
   payment-service:
