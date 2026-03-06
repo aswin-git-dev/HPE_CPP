@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from pymongo import MongoClient
 from bson import ObjectId
@@ -20,7 +21,7 @@ db = client[DB_NAME]
 orders_collection = db["orders"]
 
 
-# ─── Models ─────────────────────────────────────────────────────────────────
+# ─── Models ────────────────────────────────────────────────────────────────
 class OrderCreate(BaseModel):
     user_id: str
     product_id: str
@@ -35,8 +36,8 @@ class OrderResponse(BaseModel):
     status: str
 
 
-# ─── Utility Function ───────────────────────────────────────────────────────
-def serialize_order(order) -> dict:
+# ─── Utility Function ──────────────────────────────────────────────────────
+def serialize_order(order):
     return {
         "id": str(order["_id"]),
         "user_id": order["user_id"],
@@ -46,9 +47,151 @@ def serialize_order(order) -> dict:
     }
 
 
-# ─── Routes ─────────────────────────────────────────────────────────────────
+# ─── Simple UI Style ───────────────────────────────────────────────────────
+HTML_STYLE = """
+<style>
+body{
+font-family: Arial;
+background:#f4f6fb;
+padding:30px;
+}
+h1{
+color:#1d4ed8;
+}
+table{
+border-collapse:collapse;
+width:100%;
+margin-top:20px;
+}
+th,td{
+border:1px solid #ddd;
+padding:10px;
+text-align:center;
+}
+th{
+background:#1d4ed8;
+color:white;
+}
+form{
+margin-bottom:20px;
+}
+input{
+padding:8px;
+margin-right:10px;
+}
+button{
+padding:8px 14px;
+background:#1d4ed8;
+color:white;
+border:none;
+cursor:pointer;
+}
+</style>
+"""
 
-@app.get("/")
+
+# ─── UI Dashboard ──────────────────────────────────────────────────────────
+@app.get("/", response_class=HTMLResponse)
+def dashboard():
+
+    orders = list(orders_collection.find())
+
+    rows = ""
+
+    for order in orders:
+        rows += f"""
+        <tr>
+        <td>{order['user_id']}</td>
+        <td>{order['product_id']}</td>
+        <td>{order['quantity']}</td>
+        <td>{order['status']}</td>
+        <td>
+        <form action="/delete/{order['_id']}" method="post">
+        <button>Delete</button>
+        </form>
+        </td>
+        </tr>
+        """
+
+    html = f"""
+    <html>
+    <head>
+    <title>Order Dashboard</title>
+    {HTML_STYLE}
+    </head>
+
+    <body>
+
+    <h1>📦 Order Service Dashboard</h1>
+
+    <h3>Create Order</h3>
+
+    <form action="/create" method="post">
+
+    <input name="user_id" placeholder="User ID" required>
+
+    <input name="product_id" placeholder="Product ID" required>
+
+    <input name="quantity" type="number" placeholder="Quantity" required>
+
+    <button>Create Order</button>
+
+    </form>
+
+    <h3>All Orders</h3>
+
+    <table>
+
+    <tr>
+    <th>User</th>
+    <th>Product</th>
+    <th>Quantity</th>
+    <th>Status</th>
+    <th>Action</th>
+    </tr>
+
+    {rows}
+
+    </table>
+
+    </body>
+    </html>
+    """
+
+    return html
+
+
+# ─── Create Order from UI ─────────────────────────────────────────────────
+@app.post("/create")
+def create_order_form(
+    user_id: str = Form(...),
+    product_id: str = Form(...),
+    quantity: int = Form(...)
+):
+
+    order_data = {
+        "user_id": user_id,
+        "product_id": product_id,
+        "quantity": quantity,
+        "status": "CREATED"
+    }
+
+    orders_collection.insert_one(order_data)
+
+    return RedirectResponse("/", status_code=303)
+
+
+# ─── Delete Order from UI ─────────────────────────────────────────────────
+@app.post("/delete/{order_id}")
+def delete_order_form(order_id: str):
+
+    orders_collection.delete_one({"_id": ObjectId(order_id)})
+
+    return RedirectResponse("/", status_code=303)
+
+
+# ─── Root API ─────────────────────────────────────────────────────────────
+@app.get("/api")
 async def root():
     return {
         "service": "order-service",
@@ -57,33 +200,39 @@ async def root():
     }
 
 
+# ─── Health Check ─────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
     return {"service": "order-service", "status": "healthy"}
 
 
-# Create Order
+# ─── API: Create Order ────────────────────────────────────────────────────
 @app.post("/orders", response_model=OrderResponse)
 async def create_order(order: OrderCreate):
+
     order_data = order.dict()
     order_data["status"] = "CREATED"
 
     result = orders_collection.insert_one(order_data)
+
     new_order = orders_collection.find_one({"_id": result.inserted_id})
 
     return serialize_order(new_order)
 
 
-# Get All Orders
+# ─── API: Get All Orders ──────────────────────────────────────────────────
 @app.get("/orders", response_model=List[OrderResponse])
 async def get_orders():
+
     orders = orders_collection.find()
+
     return [serialize_order(order) for order in orders]
 
 
-# Get Order by ID
+# ─── API: Get Order by ID ─────────────────────────────────────────────────
 @app.get("/orders/{order_id}", response_model=OrderResponse)
 async def get_order(order_id: str):
+
     try:
         order = orders_collection.find_one({"_id": ObjectId(order_id)})
     except:
@@ -95,9 +244,10 @@ async def get_order(order_id: str):
     return serialize_order(order)
 
 
-# Update Order Status
+# ─── API: Update Order Status ─────────────────────────────────────────────
 @app.put("/orders/{order_id}/status")
 async def update_order_status(order_id: str, status: str):
+
     try:
         result = orders_collection.update_one(
             {"_id": ObjectId(order_id)},
@@ -112,9 +262,10 @@ async def update_order_status(order_id: str, status: str):
     return {"message": "Order status updated successfully"}
 
 
-# Delete Order
+# ─── API: Delete Order ────────────────────────────────────────────────────
 @app.delete("/orders/{order_id}")
 async def delete_order(order_id: str):
+
     try:
         result = orders_collection.delete_one({"_id": ObjectId(order_id)})
     except:
