@@ -1,7 +1,4 @@
-"""Product Service — FastAPI Microservice
-Handles product catalog management for the e‑commerce platform.
-MongoDB is used for persistence (same cluster as other services).
-"""
+"""Product Service - FastAPI Microservice"""
 from fastapi import FastAPI, HTTPException, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.encoders import jsonable_encoder
@@ -12,9 +9,8 @@ from bson.errors import InvalidId
 import motor.motor_asyncio
 import os
 
-# ──────────────────────────────────────────────
+
 # App Setup
-# ──────────────────────────────────────────────
 app = FastAPI(
     title="Product Service",
     description="Product Catalog Microservice — E-Commerce Platform",
@@ -28,9 +24,8 @@ client     = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URL)
 db         = client[DB_NAME]
 collection = db["products"]
 
-# ──────────────────────────────────────────────
+
 # Pydantic Models
-# ──────────────────────────────────────────────
 class ProductCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = None
@@ -53,9 +48,8 @@ class ProductOut(BaseModel):
     quantity: int
     category: Optional[str]
 
-# ──────────────────────────────────────────────
+
 # Helpers
-# ──────────────────────────────────────────────
 def product_doc_to_out(doc: dict) -> dict:
     return {
         "id": str(doc["_id"]),
@@ -72,9 +66,8 @@ def valid_object_id(oid: str) -> ObjectId:
     except (InvalidId, Exception):
         raise HTTPException(status_code=400, detail=f"Invalid product ID: {oid}")
 
-# ──────────────────────────────────────────────
+
 # HTML Frontend
-# ──────────────────────────────────────────────
 HTML_STYLE = """
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
@@ -267,9 +260,7 @@ def render_page(content: str, alert: str = "", alert_type: str = "success") -> s
 </html>
 """
 
-# ──────────────────────────────────────────────
 # Frontend Routes
-# ──────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse, tags=["Frontend"])
 async def dashboard(request: Request, msg: str = "", err: str = ""):
     products = await collection.find().to_list(1000)
@@ -332,13 +323,13 @@ async def dashboard(request: Request, msg: str = "", err: str = ""):
           <input name="description" placeholder="Short description">
         </div>
         <div class="full">
-          <button class="btn btn-primary" type="submit">✅ Create Product</button>
+          <button class="btn btn-primary" type="submit">Create Product</button>
         </div>
       </form>
     </div>
 
     <div class="panel">
-      <h2>📦 Catalog</h2>
+      <h2>Catalog</h2>
       {table}
     </div>
 
@@ -399,7 +390,7 @@ async def edit_page(product_id: str):
           <input name="description" value="{p['description'] or ''}">
         </div>
         <div class="full">
-          <button class="btn btn-primary" type="submit">✅ Update Product</button>
+          <button class="btn btn-primary" type="submit"> Update Product</button>
         </div>
       </form>
     </div>
@@ -441,9 +432,8 @@ async def delete_product(product_id: str):
     return RedirectResponse("/?msg=Product+deleted", status_code=303)
 
 
-# ──────────────────────────────────────────────
 # JSON API Routes
-# ──────────────────────────────────────────────
+
 @app.post("/products/", response_model=ProductOut, status_code=201, tags=["Products API"])
 async def create_api(p: ProductCreate):
     doc = jsonable_encoder(p)
