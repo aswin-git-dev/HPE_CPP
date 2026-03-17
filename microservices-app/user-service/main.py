@@ -4,7 +4,7 @@ Handles Customer Management for the E-Commerce Platform
 MongoDB (Motor async driver) for persistence
 """
 
-from fastapi import FastAPI, HTTPException, Form, Request
+from fastapi import FastAPI, HTTPException, Form, Request, Header, Cookie
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, EmailStr, Field
@@ -31,6 +31,14 @@ db         = client[DB_NAME]
 collection = db["users"]
 
 # ──────────────────────────────────────────────
+# Demo Auth (viva-friendly)
+# ──────────────────────────────────────────────
+# NOTE: This is intentionally simple for demo/testing (not production auth).
+DEMO_AUTH_TOKEN = os.getenv("DEMO_AUTH_TOKEN", "demo-token-123")
+DEMO_ADMIN_TOKEN = os.getenv("DEMO_ADMIN_TOKEN", "admin-token-123")
+AUTH_COOKIE_NAME = "auth_token"
+
+# ──────────────────────────────────────────────
 # Pydantic Models
 # ──────────────────────────────────────────────
 class UserCreate(BaseModel):
@@ -54,6 +62,147 @@ class UserOut(BaseModel):
     phone:   str
     address: Optional[str]
     role:    str
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    role: str
+
+
+def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
+    if not authorization:
+        return None
+    parts = authorization.split(" ", 1)
+    if len(parts) != 2:
+        return None
+    scheme, token = parts[0].strip().lower(), parts[1].strip()
+    if scheme != "bearer" or not token:
+        return None
+    return token
+
+
+def require_user_token(authorization: Optional[str]) -> str:
+    token = _extract_bearer_token(authorization)
+    if token in (DEMO_AUTH_TOKEN, DEMO_ADMIN_TOKEN):
+        return token
+    raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def require_admin_token(authorization: Optional[str]) -> str:
+    token = _extract_bearer_token(authorization)
+    if token == DEMO_ADMIN_TOKEN:
+        return token
+    if token in (DEMO_AUTH_TOKEN, None):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _get_cookie_token(cookie_value: Optional[str]) -> Optional[str]:
+    if not cookie_value:
+        return None
+    return cookie_value.strip() or None
+
+
+def _is_admin_token(token: Optional[str]) -> bool:
+    return token == DEMO_ADMIN_TOKEN
+
+
+def _is_any_valid_token(token: Optional[str]) -> bool:
+    return token in (DEMO_AUTH_TOKEN, DEMO_ADMIN_TOKEN)
+
+
+def render_login_page(error: str = "", next_url: str = "/user-page") -> str:
+    content = f"""
+    <div class="panel" style="max-width:560px;margin:0 auto">
+      <h2>Demo Login</h2>
+      <p style="color:#2563eb;font-size:0.9rem;margin-bottom:16px">
+        Use this page to generate real 401/403 events for the audit microservice.
+      </p>
+      <form class="create-form" action="/login" method="post">
+        <input type="hidden" name="next" value="{next_url}" />
+        <div>
+          <label>Username</label>
+          <input name="username" placeholder="admin or user" required>
+        </div>
+        <div>
+          <label>Password</label>
+          <input name="password" type="password" placeholder="admin or user" required>
+        </div>
+        <div class="full" style="display:flex;gap:12px">
+          <button class="btn btn-primary" type="submit">✅ Login</button>
+          <a href="/"><button class="btn" type="button"
+             style="background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd">Back</button></a>
+        </div>
+      </form>
+      <div style="margin-top:16px;padding:14px;border:1px dashed #93c5fd;border-radius:12px;background:#f8faff">
+        <div style="font-weight:700;color:#1d4ed8;margin-bottom:6px">Quick credentials</div>
+        <div><b>Admin:</b> admin / admin</div>
+        <div><b>User:</b> user / user</div>
+        <div style="margin-top:8px">
+          After login, open <a href="/user-page" style="color:#1d4ed8;font-weight:700">/user-page</a> (user)
+          or <a href="/admin-page" style="color:#1d4ed8;font-weight:700">/admin-page</a> (admin).
+        </div>
+      </div>
+    </div>
+    """
+    if error:
+        return render_page(content, msg=error, msg_type="error")
+    return render_page(content)
+
+
+def render_admin_page(role: str) -> str:
+    content = f"""
+    <div class="panel" style="max-width:760px;margin:0 auto">
+      <h2>🛡️ Admin Dashboard</h2>
+      <p style="color:#2563eb;font-size:0.9rem;margin-bottom:14px">
+        Logged in as <b>{role}</b>. This page is admin-only.
+      </p>
+      <div class="panel" style="background:#f8faff">
+        <h2>🎯 Audit demo actions</h2>
+        <ul style="margin-left:18px;color:#1e3a5f;line-height:1.6">
+          <li>Open an incognito window and hit <code>/admin-page</code> (redirect to login)</li>
+          <li>Login as <b>user/user</b> and hit <code>/admin-page</code> (403 Forbidden)</li>
+        </ul>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <a href="/auth/me"><button class="btn" type="button" style="background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd">Auth API /auth/me</button></a>
+        <a href="/user-page"><button class="btn" type="button" style="background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd">User Page</button></a>
+        <a href="/logout"><button class="btn btn-primary" type="button">Logout</button></a>
+      </div>
+    </div>
+    """
+    return render_page(content)
+
+
+def render_user_page(role: str) -> str:
+    content = f"""
+    <div class="panel" style="max-width:760px;margin:0 auto">
+      <h2>✅ User Dashboard</h2>
+      <p style="color:#2563eb;font-size:0.9rem;margin-bottom:14px">
+        Logged in as <b>{role}</b>.
+      </p>
+      <div class="panel" style="background:#f8faff">
+        <h2>🎯 Audit demo actions</h2>
+        <ul style="margin-left:18px;color:#1e3a5f;line-height:1.6">
+          <li>Open <code>/admin-page</code> as <b>user</b> (403 Forbidden)</li>
+          <li>Open <code>/admin-page</code> without login (redirect to login)</li>
+        </ul>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <a href="/auth/me"><button class="btn" type="button" style="background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd">Auth API /auth/me</button></a>
+        <a href="/admin-page"><button class="btn btn-primary" type="button">Admin Page</button></a>
+        <a href="/logout"><button class="btn btn-primary" type="button">Logout</button></a>
+        <a href="/"><button class="btn" type="button" style="background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd">Home</button></a>
+      </div>
+    </div>
+    """
+    return render_page(content)
 
 # ──────────────────────────────────────────────
 # Helpers
@@ -524,3 +673,97 @@ async def api_delete_user(user_id: str):
 @app.get("/health", tags=["System"])
 async def health_check():
     return {"service": "user-service", "status": "healthy", "db": DB_NAME}
+
+
+# ──────────────────────────────────────────────
+# Auth Endpoints (demo)
+# ──────────────────────────────────────────────
+@app.post("/auth/login", response_model=LoginResponse, tags=["Auth"])
+async def login(payload: LoginRequest):
+    """
+    Demo login:
+    - username=admin, password=admin -> admin token
+    - username=user,  password=user  -> user token
+    """
+    u = payload.username.strip().lower()
+    p = payload.password.strip().lower()
+    if u == "admin" and p == "admin":
+        return LoginResponse(access_token=DEMO_ADMIN_TOKEN, role="admin")
+    if u == "user" and p == "user":
+        return LoginResponse(access_token=DEMO_AUTH_TOKEN, role="user")
+    raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@app.get("/auth/me", tags=["Auth"])
+async def me(authorization: Optional[str] = Header(default=None)):
+    token = require_user_token(authorization)
+    role = "admin" if token == DEMO_ADMIN_TOKEN else "user"
+    return {"authenticated": True, "role": role}
+
+
+@app.get("/admin", tags=["Auth"])
+async def admin_only(authorization: Optional[str] = Header(default=None)):
+    require_admin_token(authorization)
+    return {"ok": True, "message": "Welcome, admin"}
+
+
+# ──────────────────────────────────────────────
+# Auth UI (demo pages)
+# ──────────────────────────────────────────────
+@app.get("/login", response_class=HTMLResponse, tags=["Auth UI"])
+async def login_page(next: str = "/user-page", err: str = ""):
+    return render_login_page(error=err, next_url=next)
+
+
+@app.post("/login", response_class=RedirectResponse, tags=["Auth UI"])
+async def login_submit(
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/user-page"),
+):
+    u = username.strip().lower()
+    p = password.strip().lower()
+
+    if u == "admin" and p == "admin":
+        target = next or "/admin-page"
+        resp = RedirectResponse(target, status_code=303)
+        resp.set_cookie(AUTH_COOKIE_NAME, DEMO_ADMIN_TOKEN, httponly=True, samesite="lax")
+        return resp
+    if u == "user" and p == "user":
+        target = next or "/user-page"
+        resp = RedirectResponse(target, status_code=303)
+        resp.set_cookie(AUTH_COOKIE_NAME, DEMO_AUTH_TOKEN, httponly=True, samesite="lax")
+        return resp
+
+    return RedirectResponse(f"/login?err=Invalid+credentials&next={next}", status_code=303)
+
+
+@app.get("/logout", response_class=RedirectResponse, tags=["Auth UI"])
+async def logout():
+    resp = RedirectResponse("/login", status_code=303)
+    resp.delete_cookie(AUTH_COOKIE_NAME)
+    return resp
+
+
+@app.get("/admin-page", response_class=HTMLResponse, tags=["Auth UI"])
+async def admin_page(auth_token: Optional[str] = Cookie(default=None, alias=AUTH_COOKIE_NAME)):
+    token = _get_cookie_token(auth_token)
+    if not token:
+        return RedirectResponse("/login?next=/admin-page", status_code=303)
+    if token == DEMO_AUTH_TOKEN:
+        # User logged in but not admin -> 403 (this generates a real forbidden log)
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if token != DEMO_ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return render_admin_page(role="admin")
+
+
+@app.get("/user-page", response_class=HTMLResponse, tags=["Auth UI"])
+async def user_page(auth_token: Optional[str] = Cookie(default=None, alias=AUTH_COOKIE_NAME)):
+    token = _get_cookie_token(auth_token)
+    if not token:
+        return RedirectResponse("/login?next=/user-page", status_code=303)
+    if not _is_any_valid_token(token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    role = "admin" if token == DEMO_ADMIN_TOKEN else "user"
+    return render_user_page(role=role)
