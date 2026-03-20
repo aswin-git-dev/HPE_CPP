@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: notification-service
-  namespace: ecommerce
+  namespace: notification-ns
   labels:
     app: notification-service
     tier: backend

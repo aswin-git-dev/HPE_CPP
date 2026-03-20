@@ -1,49 +1,25 @@
-# ─── NetworkPolicy ─────────────────────────────────────────────────────────────
-# Default-deny all ingress/egress, then explicitly allow only required traffic.
-# This implements zero-trust networking within the ecommerce namespace.
+# ─── NetworkPolicy — Multi-Namespace Zero-Trust ─────────────────────────────────
+# Default-deny all ingress in every microservice namespace, then selectively
+# allow traffic needed for inter-service communication.
 
-# 1. Default Deny All Ingress
+# ════════════════════════════════════════════════════════════════════════════════
+# ECOMMERCE NAMESPACE (infrastructure: MongoDB, OpenSearch, Audit)
+# ════════════════════════════════════════════════════════════════════════════════
+
+# 1. Default deny all ingress in ecommerce namespace
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: default-deny-ingress
   namespace: ecommerce
 spec:
-  podSelector: {}       # Applies to ALL pods in namespace
+  podSelector: {}
   policyTypes:
     - Ingress
 
 ---
-# 2. Allow ingress to user-service from: ingress-controller + same namespace
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-user-service
-  namespace: ecommerce
-spec:
-  podSelector:
-    matchLabels:
-      app: user-service
-  policyTypes:
-    - Ingress
-  ingress:
-    # From NGINX ingress controller (namespace: ingress-nginx)
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ingress-nginx
-      ports:
-        - protocol: TCP
-          port: 8000
-    # From any pod in the ecommerce namespace (inter-service calls)
-    - from:
-        - podSelector: {}
-      ports:
-        - protocol: TCP
-          port: 8000
-
----
-# 3. Allow ingress to MongoDB only from within the ecommerce namespace
+# 2. Allow MongoDB ingress from all microservice namespaces
+#    (user-ns, product-ns, order-ns, notification-ns) + ecommerce itself
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -56,28 +32,279 @@ spec:
   policyTypes:
     - Ingress
   ingress:
+    # From ecommerce namespace itself (audit-service etc.)
     - from:
-        - podSelector: {}    # Only from pods inside ecommerce namespace
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 27017
+    # From user-ns
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: user-ns
+      ports:
+        - protocol: TCP
+          port: 27017
+    # From product-ns
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: product-ns
+      ports:
+        - protocol: TCP
+          port: 27017
+    # From order-ns (order + payment services)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: order-ns
+      ports:
+        - protocol: TCP
+          port: 27017
+    # From notification-ns
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: notification-ns
       ports:
         - protocol: TCP
           port: 27017
 
 ---
-# 4. Allow stub services to receive ingress from inside the namespace
+# 3. Allow OpenSearch ingress from all namespaces (for audit)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-stub-services
+  name: allow-opensearch
   namespace: ecommerce
 spec:
   podSelector:
     matchLabels:
-      tier: backend          # Matches all backend services
+      app: opensearch
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}    # Within ecommerce (audit-service, dashboards)
+      ports:
+        - protocol: TCP
+          port: 9200
+
+---
+# 4. Allow audit-service ingress from all microservice namespaces + ecommerce
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-audit-service
+  namespace: ecommerce
+spec:
+  podSelector:
+    matchLabels:
+      app: audit-service
   policyTypes:
     - Ingress
   ingress:
     - from:
         - podSelector: {}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              project: ecommerce-platform
+
+---
+# ════════════════════════════════════════════════════════════════════════════════
+# USER-NS NAMESPACE
+# ════════════════════════════════════════════════════════════════════════════════
+
+# 5. Default deny all ingress in user-ns
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: user-ns
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# 6. Allow user-service ingress from ingress controller + same namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-user-service
+  namespace: user-ns
+spec:
+  podSelector:
+    matchLabels:
+      app: user-service
+  policyTypes:
+    - Ingress
+  ingress:
+    # From NGINX ingress controller
+    - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+    # From within user-ns
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8000
+    # From order-ns (orders can query user info)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: order-ns
+      ports:
+        - protocol: TCP
+          port: 8000
+
+---
+# ════════════════════════════════════════════════════════════════════════════════
+# PRODUCT-NS NAMESPACE
+# ════════════════════════════════════════════════════════════════════════════════
+
+# 7. Default deny all ingress in product-ns
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: product-ns
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# 8. Allow product-service ingress from ingress controller + order-ns
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-product-service
+  namespace: product-ns
+spec:
+  podSelector:
+    matchLabels:
+      app: product-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8001
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8001
+    # Orders need to query products
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: order-ns
+      ports:
+        - protocol: TCP
+          port: 8001
+
+---
+# ════════════════════════════════════════════════════════════════════════════════
+# ORDER-NS NAMESPACE (order + payment)
+# ════════════════════════════════════════════════════════════════════════════════
+
+# 9. Default deny all ingress in order-ns
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: order-ns
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# 10. Allow order-service + payment-service ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-order-services
+  namespace: order-ns
+spec:
+  podSelector:
+    matchLabels:
+      tier: backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+    - from:
+        - podSelector: {}   # inter-service within order-ns (order ↔ payment)
+    # Notification can be triggered by order events
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: notification-ns
+
+---
+# ════════════════════════════════════════════════════════════════════════════════
+# NOTIFICATION-NS NAMESPACE
+# ════════════════════════════════════════════════════════════════════════════════
+
+# 11. Default deny all ingress in notification-ns
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: notification-ns
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# 12. Allow notification-service ingress from ingress + order-ns
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-notification-service
+  namespace: notification-ns
+spec:
+  podSelector:
+    matchLabels:
+      app: notification-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8004
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8004
+    # Order events trigger notifications
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: order-ns
+      ports:
+        - protocol: TCP
+          port: 8004

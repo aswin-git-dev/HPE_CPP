@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: log-forwarder
+  namespace: ecommerce
+  labels:
+    app: log-forwarder
+spec:
+  selector:
+    matchLabels:
+      app: log-forwarder
+  template:
+    metadata:
+      labels:
+        app: log-forwarder
+    spec:
+      containers:
+      - name: vector
+        image: timberio/vector:0.39.0-debian
+        command: ["vector", "--config", "/etc/vector/vector.toml"]
+        volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run/docker.sock
+          readOnly: true
+        - name: vector-config
+          mountPath: /etc/vector/vector.toml
+          subPath: vector.toml
+          readOnly: true
+      volumes:
+      - name: docker-sock
+        hostPath:
+          path: /var/run/docker.sock
+      - name: vector-config
+        configMap:
+          name: vector-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-config
+  namespace: ecommerce
+data:
+  vector.toml: |
+    [sources.docker]
+    type = "docker_logs"
+    
+    [sinks.audit]
+    type = "http"
+    inputs = ["docker"]
+    uri = "http://audit-service.ecommerce.svc.cluster.local:8005/ingest/app"
+    encoding.codec = "json"

@@ -1,26 +1,31 @@
-# ─── PodDisruptionBudget for user-service ──────────────────────────────────────
-# Ensures at least 1 user-service pod is always available during node
+# ─── PodDisruptionBudgets ────────────────────────────────────────────────────────
+# Each PDB lives in its service's dedicated namespace.
+# Ensures at least 1 pod per service is always available during node
 # maintenance, rolling updates, or cluster upgrades.
+
+# ── user-service PDB (user-ns) ────────────────────────────────────────────────
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: user-service-pdb
-  namespace: ecommerce
+  namespace: user-ns           # ← dedicated namespace
   labels:
     app: user-service
 spec:
-  minAvailable: 1       # Always keep at least 1 pod alive
+  minAvailable: 1
   selector:
     matchLabels:
       app: user-service
 
 ---
-# ─── PodDisruptionBudget for product-service ──────────────────────────────────
+# ── product-service PDB (product-ns) ─────────────────────────────────────────
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: product-service-pdb
-  namespace: ecommerce
+  namespace: product-ns        # ← dedicated namespace
+  labels:
+    app: product-service
 spec:
   minAvailable: 1
   selector:
@@ -28,12 +33,14 @@ spec:
       app: product-service
 
 ---
-# ─── PodDisruptionBudget for order-service ────────────────────────────────────
+# ── order-service PDB (order-ns) ─────────────────────────────────────────────
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: order-service-pdb
-  namespace: ecommerce
+  namespace: order-ns          # ← dedicated namespace
+  labels:
+    app: order-service
 spec:
   minAvailable: 1
   selector:
@@ -41,12 +48,14 @@ spec:
       app: order-service
 
 ---
-# ─── PodDisruptionBudget for payment-service ──────────────────────────────────
+# ── payment-service PDB (order-ns) ───────────────────────────────────────────
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: payment-service-pdb
-  namespace: ecommerce
+  namespace: order-ns          # ← shares order-ns with order-service
+  labels:
+    app: payment-service
 spec:
   minAvailable: 1
   selector:
@@ -54,12 +63,14 @@ spec:
       app: payment-service
 
 ---
-# ─── PodDisruptionBudget for notification-service ─────────────────────────────
+# ── notification-service PDB (notification-ns) ────────────────────────────────
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: notification-service-pdb
-  namespace: ecommerce
+  namespace: notification-ns   # ← dedicated namespace
+  labels:
+    app: notification-service
 spec:
   minAvailable: 1
   selector:

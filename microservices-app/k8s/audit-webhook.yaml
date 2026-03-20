@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Config
+preferences: {}
+clusters:
+- name: audit-service
+  cluster:
+    # URL pointing to the Audit Microservice via the host or ClusterIP.
+    # Minikube API server host network can reach ClusterIPs, but to be absolutely safe,
+    # we'll target the ClusterIP dynamically, or use the service name if DNS resolves.
+    server: http://audit-service.ecommerce.svc.cluster.local:8005/ingest/audit
+users:
+- name: apiserver
+  user: {}
+contexts:
+- name: webhook
+  context:
+    cluster: audit-service
+    user: apiserver
+current-context: webhook

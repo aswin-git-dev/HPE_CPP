@@ -4,7 +4,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: product-service
-  namespace: ecommerce
+  namespace: product-ns
   labels:
     app: product-service
     tier: backend

@@ -1,7 +1,83 @@
-# ─── Ingress (NGINX) ───────────────────────────────────────────────────────────
-# Routes external traffic to services based on path prefix.
-# Requires nginx ingress controller:
+# ─── Ingress (NGINX) — Multi-Namespace ─────────────────────────────────────────
+# Routes external traffic to services in dedicated namespaces.
+# Each path maps to an ExternalName Service in the ecommerce namespace that
+# proxies to the real service in its own namespace via cluster DNS.
+#
+# REQUIRES: nginx.ingress.kubernetes.io/enable-cross-namespace-resources: "true"
+# or use ExternalName Services (defined below) as bridge services.
+#
+# Ingress controller install:
 #   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.0/deploy/static/provider/cloud/deploy.yaml
+
+# ── ExternalName Bridge Services ──────────────────────────────────────────────
+# These live in ecommerce namespace and forward traffic to the real services
+# in their dedicated namespaces.
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+  namespace: ecommerce
+spec:
+  type: ExternalName
+  externalName: user-service.user-ns.svc.cluster.local
+  ports:
+    - port: 80
+      targetPort: 8000
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-service
+  namespace: ecommerce
+spec:
+  type: ExternalName
+  externalName: product-service.product-ns.svc.cluster.local
+  ports:
+    - port: 80
+      targetPort: 8001
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  namespace: ecommerce
+spec:
+  type: ExternalName
+  externalName: order-service.order-ns.svc.cluster.local
+  ports:
+    - port: 80
+      targetPort: 8002
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+  namespace: ecommerce
+spec:
+  type: ExternalName
+  externalName: payment-service.order-ns.svc.cluster.local
+  ports:
+    - port: 80
+      targetPort: 8003
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+  namespace: ecommerce
+spec:
+  type: ExternalName
+  externalName: notification-service.notification-ns.svc.cluster.local
+  ports:
+    - port: 80
+      targetPort: 8004
+
+---
+# ── NGINX Ingress Resource ────────────────────────────────────────────────────
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -15,23 +91,22 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
-    # Rate limiting to protect services
     nginx.ingress.kubernetes.io/limit-rps: "100"
 spec:
   ingressClassName: nginx
   rules:
-    - host: ecommerce.local     # Change to your actual domain / use IP for local
+    - host: ecommerce.local
       http:
         paths:
-          # ── User Service (Full) ──────────────────────────────────────
+          # ── User Service → user-ns ────────────────────────────────────
           - path: /users(/|$)(.*)
             pathType: ImplementationSpecific
             backend:
               service:
-                name: user-service
+                name: user-service      # ExternalName → user-ns
                 port:
                   number: 80
-          # ── Dashboard Root ───────────────────────────────────────────
+          # ── Dashboard Root ────────────────────────────────────────────
           - path: /()(.*)
             pathType: ImplementationSpecific
             backend:
@@ -39,35 +114,35 @@ spec:
                 name: user-service
                 port:
                   number: 80
-          # ── Product Service (Stub) ───────────────────────────────────
+          # ── Product Service → product-ns ──────────────────────────────
           - path: /products(/|$)(.*)
             pathType: ImplementationSpecific
             backend:
               service:
-                name: product-service
+                name: product-service   # ExternalName → product-ns
                 port:
                   number: 80
-          # ── Order Service (Stub) ─────────────────────────────────────
+          # ── Order Service → order-ns ──────────────────────────────────
           - path: /orders(/|$)(.*)
             pathType: ImplementationSpecific
             backend:
               service:
-                name: order-service
+                name: order-service     # ExternalName → order-ns
                 port:
                   number: 80
-          # ── Payment Service (Stub) ───────────────────────────────────
+          # ── Payment Service → order-ns ────────────────────────────────
           - path: /payments(/|$)(.*)
             pathType: ImplementationSpecific
             backend:
               service:
-                name: payment-service
+                name: payment-service   # ExternalName → order-ns
                 port:
                   number: 80
-          # ── Notification Service (Stub) ──────────────────────────────
+          # ── Notification Service → notification-ns ────────────────────
           - path: /notifications(/|$)(.*)
             pathType: ImplementationSpecific
             backend:
               service:
-                name: notification-service
+                name: notification-service  # ExternalName → notification-ns
                 port:
                   number: 80

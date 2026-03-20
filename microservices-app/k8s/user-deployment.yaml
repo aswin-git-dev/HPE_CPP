@@ -5,7 +5,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: user-service
-  namespace: ecommerce
+  namespace: user-ns
   labels:
     app: user-service
     version: "1.0.0"
@@ -36,21 +36,7 @@ spec:
             matchLabels:
               app: user-service
 
-      # ── Anti-affinity: prefer different physical nodes ───────────────────
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchExpressions:
-                    - key: app
-                      operator: In
-                      values:
-                        - user-service
-                topologyKey: kubernetes.io/hostname
-
-      # ── Node preference: schedule on worker nodes ────────────────────────
+      # ── Anti-affinity + node preference combined ─────────────────────────
       affinity:
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
