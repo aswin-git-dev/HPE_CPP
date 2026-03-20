@@ -6,11 +6,10 @@ echo =======================================================
 echo.
 echo [1/8] Starting Minikube cluster with Audit Logging enabled...
 echo Copying Audit configuration to minikube auto-sync directory...
-if not exist "%USERPROFILE%\.minikube\files\etc\kubernetes" mkdir "%USERPROFILE%\.minikube\files\etc\kubernetes"
-copy /Y audit-policy.yaml "%USERPROFILE%\.minikube\files\etc\kubernetes\audit-policy.yaml"
-copy /Y audit-webhook.yaml "%USERPROFILE%\.minikube\files\etc\kubernetes\audit-webhook.yaml"
+if not exist "%USERPROFILE%\.minikube\files\var\lib\minikube\certs" mkdir "%USERPROFILE%\.minikube\files\var\lib\minikube\certs"
+copy /Y audit-policy.yaml "%USERPROFILE%\.minikube\files\var\lib\minikube\certs\audit-policy.yaml"
 minikube start --driver=docker ^
-  --extra-config=apiserver.audit-policy-file=/etc/kubernetes/audit-policy.yaml ^
+  --extra-config=apiserver.audit-policy-file=/var/lib/minikube/certs/audit-policy.yaml ^
   --extra-config=apiserver.audit-log-path=-
 
 echo.
