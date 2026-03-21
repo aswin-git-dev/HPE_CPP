@@ -108,27 +108,3 @@ Use **Kiali Dashboard** to visualize service communication and security flows:
 istioctl dashboard kiali
 ```
 
----
-
-## 🎯 Key Highlights
-
-- ✅ Zero code changes required  
-- ✅ Automatic security enforcement  
-- ✅ Deep observability into traffic  
-- ✅ Real-time attack simulation capability  
-- ✅ Scalable cloud-native architecture  
-
----
-
-## 🧠 Future Enhancements
-
-- Integrate **Prometheus + Grafana** for metrics  
-- Add **AI-based anomaly detection**  
-- Implement **rate limiting & WAF policies**  
-- Extend to multi-namespace / multi-cluster setup  
-
----
-
-## 📌 Conclusion
-
-This framework demonstrates how a **Service Mesh (Istio)** can transform a basic microservices setup into a **secure, observable, and intelligent system** capable of detecting and analyzing threats in real time.
