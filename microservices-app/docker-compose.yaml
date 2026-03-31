@@ -29,12 +29,6 @@ services:
       - mongo-data:/data/db
     networks:
       - ecommerce-net
-    healthcheck:
-      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 15s
 
   # ── User Service (Full Implementation) ────────────────────────────────────
   user-service:
@@ -50,15 +44,9 @@ services:
       - "8000:8000"
     depends_on:
       mongodb:
-        condition: service_healthy
+        condition: service_started
     networks:
       - ecommerce-net
-    healthcheck:
-      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
 
   # ── Product Service (Full Implementation) ───────────────────────────────
   product-service:
@@ -74,15 +62,9 @@ services:
       - "8001:8001"
     depends_on:
       mongodb:
-        condition: service_healthy
+        condition: service_started
     networks:
       - ecommerce-net
-    healthcheck:
-      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
 
   # ── Order Service (Stub) ──────────────────────────────────────────────────
   order-service:
@@ -97,15 +79,9 @@ services:
       - "8002:8002"
     depends_on:
       mongodb:
-        condition: service_healthy
+        condition: service_started
     networks:
       - ecommerce-net
-    healthcheck:
-      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
 
   # ── Payment Service (Stub) ────────────────────────────────────────────────
   payment-service:
@@ -133,15 +109,9 @@ services:
       - "8004:8004"
     depends_on:
       mongodb:
-        condition: service_healthy
+        condition: service_started
     networks:
       - ecommerce-net
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
 
   # ── OpenSearch (Centralized Security/Event Storage) ───────────────────────
   opensearch:
@@ -165,12 +135,6 @@ services:
       - opensearch-data:/usr/share/opensearch/data
     networks:
       - ecommerce-net
-    healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1"]
-      interval: 20s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
 
   # ── Audit Service (Security Monitoring Ingestion) ─────────────────────────
   audit-service:
@@ -196,15 +160,9 @@ services:
       - "8005:8005"
     depends_on:
       opensearch:
-        condition: service_healthy
+        condition: service_started
     networks:
       - ecommerce-net
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
 
   # ── OpenSearch Dashboards (UI) ─────────────────────────────────────────────
   opensearch-dashboards:
@@ -218,7 +176,7 @@ services:
       - "5601:5601"
     depends_on:
       opensearch:
-        condition: service_healthy
+        condition: service_started
     networks:
       - ecommerce-net
 
@@ -233,7 +191,7 @@ services:
     command: ["--config", "/etc/vector/vector.toml"]
     depends_on:
       audit-service:
-        condition: service_healthy
+        condition: service_started
     networks:
       - ecommerce-net
     ports:

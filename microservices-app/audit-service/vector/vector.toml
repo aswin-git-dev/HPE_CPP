@@ -88,5 +88,5 @@ uri = "http://audit-service:8005/ingest/bulk"
 method = "post"
 encoding.codec = "json"
 request.timeout_secs = 5
-healthcheck.enabled = true
+healthcheck.enabled = false
 

@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from opensearchpy import OpenSearch, RequestsHttpConnection
+from opensearchpy.exceptions import RequestError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.core.config import Settings
@@ -71,7 +72,15 @@ class OpenSearchService:
     def ensure_index(self) -> None:
         if not self.client.indices.exists(self.index):
             logger.info("creating_opensearch_index", extra={"index": self.index})
-            self.client.indices.create(index=self.index, body=DEFAULT_INDEX_MAPPING)
+            try:
+                self.client.indices.create(index=self.index, body=DEFAULT_INDEX_MAPPING)
+            except RequestError as e:
+                # OpenSearch returns 400 resource_already_exists_exception if another
+                # replica races to create the index at the same time.
+                if getattr(e, "error", "") == "resource_already_exists_exception":
+                    logger.info("opensearch_index_already_exists", extra={"index": self.index})
+                else:
+                    raise
             return
 
         # Ensure new fields are present even if index already exists

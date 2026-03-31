@@ -22,7 +22,7 @@ class BulkEvent(BaseModel):
 def _process_and_store(request: Request, normalized: Dict[str, Any]) -> bool:
     retention = request.app.state.retention_service
     tagging = request.app.state.tagging_service
-    opensearch = request.app.state.opensearch_service
+    store = request.app.state.event_store_service
     stats = request.app.state.stats_service
 
     normalized["tags"] = tagging.build_tags(normalized)
@@ -31,14 +31,14 @@ def _process_and_store(request: Request, normalized: Dict[str, Any]) -> bool:
         return False
 
     try:
-        opensearch.index_event(retained)
+        store.index_event(retained)
         # update stats using the original normalized values (before retention removal)
         stats.record_processed(SourceType(normalized["source_type"]), severity=_coerce_sev(normalized.get("severity")))
         return True
     except Exception:
         stats.record_failed()
         logger.exception(
-            "opensearch_index_failed",
+            "event_store_failed",
             extra={"request_id": get_request_id(), "event_id": normalized.get("event_id"), "source_type": normalized.get("source_type")},
         )
         return False

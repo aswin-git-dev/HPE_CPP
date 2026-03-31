@@ -1,0 +1,170 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-k8s-audit-config
+  namespace: ecommerce
+data:
+  vector.toml: |
+    data_dir = "/var/lib/vector"
+
+    # Supports both:
+    # - kubeadm: /var/log/kubernetes/audit/audit.log
+    # - minikube: /var/log/audit.log
+    [sources.k8s_audit_file]
+    type = "file"
+    include = ["/host/var/log/kubernetes/audit/audit.log", "/host/var/log/audit.log"]
+    read_from = "beginning"
+    ignore_older_secs = 0
+
+    [transforms.to_bulk]
+    type = "remap"
+    inputs = ["k8s_audit_file"]
+    source = '''
+      msg = to_string(.message) ?? ""
+      parsed, err = parse_json(msg)
+      if err != null || !is_object(parsed) {
+        parsed = {}
+      }
+
+      . = {}
+      .auditID = to_string(parsed.auditID) ?? null
+      .requestReceivedTimestamp = to_string(parsed.requestReceivedTimestamp) ?? null
+      .stageTimestamp = to_string(parsed.stageTimestamp) ?? null
+      .verb = to_string(parsed.verb) ?? "unknown"
+      .stage = to_string(parsed.stage) ?? null
+      .requestURI = to_string(parsed.requestURI) ?? "/unknown"
+
+      user = parsed.user
+      if is_object(user) {
+        .user = {}
+        .user.username = to_string(user.username) ?? null
+        if is_array(user.groups) {
+          .user.groups = user.groups
+        }
+      }
+
+      obj = parsed.objectRef
+      if is_object(obj) {
+        .objectRef = {}
+        .objectRef.namespace = to_string(obj.namespace) ?? null
+        .objectRef.resource = to_string(obj.resource) ?? null
+        .objectRef.name = to_string(obj.name) ?? null
+      }
+
+      resp = parsed.responseStatus
+      if is_object(resp) {
+        .responseStatus = {}
+        c, cerr = to_int(resp.code)
+        .responseStatus.code = if cerr == null { c } else { null }
+      }
+
+      if is_array(parsed.sourceIPs) {
+        .sourceIPs = parsed.sourceIPs
+      }
+
+      ann = parsed.annotations
+      audit_event = .
+      audit_event.annotations = if is_object(ann) { ann } else { {} }
+
+      # Keep entire source event for traceability, but outside strict schema.
+      audit_event.extra = { "raw_event": parsed, "raw_line": msg }
+
+      . = {
+        "source_type": "k8s_audit",
+        "event": audit_event
+      }
+    '''
+
+    # Kubernetes core/v1 "events" objects are patched constantly by kubelets/controllers
+    # when pods fail (ImagePullBackOff, etc.) — noisy and not the same as "audit events ingested".
+    [transforms.drop_k8s_event_object_churn]
+    type = "filter"
+    inputs = ["to_bulk"]
+    condition = '''
+      r = ""
+      if is_object(.event.objectRef) {
+        r = to_string(.event.objectRef.resource) ?? ""
+      }
+      v = downcase(to_string(.event.verb) ?? "")
+      !(r == "events" && (v == "patch" || v == "update"))
+    '''
+
+    [transforms.only_valid_k8s_audit]
+    type = "filter"
+    inputs = ["drop_k8s_event_object_churn"]
+    condition = '.event != null && .event.requestURI != null && .event.verb != "unknown"'
+
+    [sinks.audit_service]
+    type = "http"
+    inputs = ["only_valid_k8s_audit"]
+    uri = "http://audit-service.ecommerce.svc.cluster.local:8005/ingest/bulk"
+    method = "post"
+    encoding.codec = "json"
+    batch.max_events = 1
+    batch.timeout_secs = 1
+    request.timeout_secs = 10
+    healthcheck.enabled = false
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: k8s-audit-forwarder
+  namespace: ecommerce
+  labels:
+    app: k8s-audit-forwarder
+spec:
+  selector:
+    matchLabels:
+      app: k8s-audit-forwarder
+  template:
+    metadata:
+      labels:
+        app: k8s-audit-forwarder
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+        kubernetes.io/os: linux
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+
+      containers:
+        - name: vector
+          image: timberio/vector:0.39.0-debian
+          imagePullPolicy: IfNotPresent
+          command: ["vector", "--config", "/etc/vector/vector.toml"]
+          volumeMounts:
+            - name: host-var-log
+              mountPath: /host/var/log
+              readOnly: true
+            - name: vector-config
+              mountPath: /etc/vector/vector.toml
+              subPath: vector.toml
+              readOnly: true
+            - name: vector-data
+              mountPath: /var/lib/vector
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+
+      volumes:
+        - name: host-var-log
+          hostPath:
+            path: /var/log
+            type: Directory
+        - name: vector-config
+          configMap:
+            name: vector-k8s-audit-config
+        - name: vector-data
+          hostPath:
+            path: /var/lib/vector-k8s-audit
+            type: DirectoryOrCreate

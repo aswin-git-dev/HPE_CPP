@@ -7,6 +7,8 @@ data:
   ENV: "prod"
   LOG_LEVEL: "INFO"
   PORT: "8005"
+  EVENT_STORE_MAX_EVENTS: "10000"
+  CLUSTER_SOURCE_URN: "urn:k8s:cluster:prod-cluster-01"
 
   # Namespace filtering
   # ALLOWED_NAMESPACES: "ecommerce,default"
@@ -16,13 +18,6 @@ data:
   STORE_RAW_EVENT: "true"
   RAW_EVENT_MAX_BYTES: "64000"
   # RETAINED_FIELDS: "event_id,timestamp,source_type,namespace,service_name,severity,event_type,message,tags,status_code"
-
-  # OpenSearch
-  OPENSEARCH_URL: "http://opensearch:9200"
-  OPENSEARCH_INDEX: "audit-events"
-  OPENSEARCH_VERIFY_CERTS: "false"
-  OPENSEARCH_TIMEOUT_S: "10"
-  OPENSEARCH_MAX_RETRIES: "3"
 
   # Observability
   ENABLE_METRICS: "true"

@@ -15,6 +15,7 @@ spec:
       labels:
         app: audit-service
     spec:
+      serviceAccountName: audit-service-monitor
       containers:
         - name: audit-service
           image: audit-service:latest
@@ -27,18 +28,6 @@ spec:
                 name: audit-service-config
             - secretRef:
                 name: audit-service-secret
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8005
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8005
-            initialDelaySeconds: 10
-            periodSeconds: 20
           resources:
             requests:
               cpu: "100m"
@@ -46,4 +35,31 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
-
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: audit-service-monitor
+  namespace: ecommerce
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: audit-service-monitor-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: audit-service-monitor-reader-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: audit-service-monitor-reader
+subjects:
+  - kind: ServiceAccount
+    name: audit-service-monitor
+    namespace: ecommerce

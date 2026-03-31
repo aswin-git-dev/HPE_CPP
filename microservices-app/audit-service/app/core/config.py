@@ -37,14 +37,9 @@ class Settings(BaseSettings):
         description="Comma-separated normalized fields to keep (e.g. event_id,timestamp,source_type,message).",
     )
 
-    # OpenSearch
-    opensearch_url: str = Field(default="http://opensearch:9200")
-    opensearch_user: Optional[str] = None
-    opensearch_password: Optional[str] = None
-    opensearch_index: str = Field(default="audit-events")
-    opensearch_verify_certs: bool = Field(default=False)
-    opensearch_timeout_s: int = Field(default=10)
-    opensearch_max_retries: int = Field(default=3)
+    # In-memory monitor store
+    event_store_max_events: int = Field(default=5000)
+    cluster_source_urn: str = Field(default="urn:k8s:cluster:prod-cluster-01")
 
     # Observability
     enable_metrics: bool = Field(default=True)

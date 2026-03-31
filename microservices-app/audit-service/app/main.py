@@ -4,12 +4,12 @@ import logging
 
 from fastapi import FastAPI
 
-from app.api import health_router, ingest_router, metrics_router, stats_router
+from app.api import control_plane_router, health_router, ingest_router, metrics_router, stats_router
 from app.core.config import get_settings
 from app.core.logging_config import setup_logging
 from app.middleware.exception_handler import ExceptionHandlingMiddleware
-from app.middleware.request_context import RequestContextMiddleware, get_request_id
-from app.services import Normalizer, OpenSearchService, RetentionService, StatsService, TaggingService
+from app.middleware.request_context import RequestContextMiddleware
+from app.services import EventStoreService, K8sMonitorService, Normalizer, RetentionService, StatsService, TaggingService
 
 
 def create_app() -> FastAPI:
@@ -20,7 +20,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Audit Microservice",
         version="1.0.0",
-        description="Collects, normalizes, filters, tags, and stores security events in OpenSearch.",
+        description="Control-plane monitoring and audit event service.",
     )
 
     # Middleware
@@ -29,24 +29,23 @@ def create_app() -> FastAPI:
 
     # Services (simple DI via app.state, viva-friendly)
     app.state.normalizer = Normalizer()
+    app.state.settings = settings
     app.state.tagging_service = TaggingService()
     app.state.stats_service = StatsService()
     app.state.retention_service = RetentionService(settings)
-    app.state.opensearch_service = OpenSearchService(settings)
+    app.state.event_store_service = EventStoreService(max_events=settings.event_store_max_events)
+    app.state.k8s_monitor_service = K8sMonitorService()
 
     # Routes
     app.include_router(health_router)
     app.include_router(stats_router)
     app.include_router(metrics_router)
     app.include_router(ingest_router)
+    app.include_router(control_plane_router)
 
     @app.on_event("startup")
     def _startup() -> None:
-        try:
-            app.state.opensearch_service.ensure_index()
-            logger.info("startup_ok", extra={"request_id": get_request_id(), "index": settings.opensearch_index})
-        except Exception:
-            logger.exception("startup_opensearch_failed")
+        logger.info("startup_ok")
 
     return app
 
