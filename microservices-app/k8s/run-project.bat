@@ -8,6 +8,42 @@ echo  HPE Control-Plane Monitor - K8s Runner
 echo ============================================================
 echo.
 
+REM ── Pre-flight: check required tools are installed ───────────
+echo [CHECK] Verifying required tools...
+set PREFLIGHT_OK=1
+
+where docker >nul 2>&1
+if %errorlevel% neq 0 (
+  echo   [MISSING] docker  ^> Install Docker Desktop: https://www.docker.com/products/docker-desktop
+  set PREFLIGHT_OK=0
+)
+
+where minikube >nul 2>&1
+if %errorlevel% neq 0 (
+  echo   [MISSING] minikube  ^> Install: https://minikube.sigs.k8s.io/docs/start/
+  set PREFLIGHT_OK=0
+)
+
+where kubectl >nul 2>&1
+if %errorlevel% neq 0 (
+  echo   [MISSING] kubectl  ^> Comes with Docker Desktop (enable Kubernetes) or install separately
+  set PREFLIGHT_OK=0
+)
+
+docker info >nul 2>&1
+if %errorlevel% neq 0 (
+  echo   [NOT RUNNING] Docker Desktop is installed but not running - please start it first.
+  set PREFLIGHT_OK=0
+)
+
+if "%PREFLIGHT_OK%"=="0" (
+  echo.
+  echo  Pre-flight FAILED. Install the missing tools above, then re-run.
+  pause & exit /b 1
+)
+echo   All tools found. OK.
+echo.
+
 REM ── Stop docker-compose to free CPU before minikube starts ───
 echo [0] Stopping any docker-compose services (frees CPU)...
 docker compose -f ..\..\docker-compose.yaml down >nul 2>&1
