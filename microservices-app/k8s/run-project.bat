@@ -139,6 +139,20 @@ if "%SKIP_IMAGE_BUILD%"=="1" (
 ) else (
   echo      Building service images on minikube node...
   echo      This takes 3-10 min total. Set SKIP_IMAGE_BUILD=1 to skip on re-runs.
+  echo.
+
+  if not "%SKIP_DOCKER_DNS_CHECK%"=="1" (
+    docker run --rm busybox:1.36 nslookup pypi.org >nul 2>&1
+    if errorlevel 1 (
+      echo  [WARN] Docker cannot resolve DNS in containers — pip will fail with "name resolution".
+      echo          Fix: Docker Desktop -^> Settings -^> Docker Engine -^> add:
+      echo          "dns": ["8.8.8.8", "1.1.1.1"]
+      echo          Apply and restart. Or run: check-docker-dns.bat
+      echo          To skip this check: set SKIP_DOCKER_DNS_CHECK=1
+      echo.
+      pause
+    )
+  )
 
   minikube image build -t user-service:latest         ..\user-service
   minikube image build -t product-service:latest      ..\product-service
