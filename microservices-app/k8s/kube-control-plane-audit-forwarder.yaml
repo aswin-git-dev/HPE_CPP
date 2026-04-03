@@ -133,6 +133,28 @@ spec:
           operator: Exists
           effect: NoSchedule
 
+      # Vector's HTTP sink fails with "connection refused" if it starts before audit-service is listening.
+      # That leaves the UI empty until someone restarts this DaemonSet. Wait for the Service to answer first.
+      initContainers:
+        - name: wait-for-audit-service
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for http://audit-service.ecommerce.svc.cluster.local:8005/health ..."
+              i=0
+              while [ "$i" -lt 120 ]; do
+                if wget -q -O /dev/null -T 3 http://audit-service.ecommerce.svc.cluster.local:8005/health 2>/dev/null; then
+                  echo "audit-service is reachable."
+                  exit 0
+                fi
+                i=$((i+1))
+                sleep 2
+              done
+              echo "Timeout: audit-service never became reachable. Check: kubectl get pods -n ecommerce -l app=audit-service"
+              exit 1
+
       containers:
         - name: vector
           image: timberio/vector:0.39.0-debian

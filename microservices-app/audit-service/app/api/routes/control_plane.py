@@ -153,7 +153,7 @@ def control_plane_ui():
       <div class="top">
         <div>
           <div class="title">Kubernetes Control-Plane Monitor</div>
-          <div class="muted">Live pods by namespace + HPE audit payload stream</div>
+          <div class="muted">Live pods by namespace + HPE audit payload stream · <a href="/control-plane/architecture/ui" style="color: rgba(250,249,246,0.92); text-decoration: underline;">Architecture map</a></div>
         </div>
         <div class="controls">
           <label class="muted" style="color: rgba(250,249,246,0.9);">Limit</label>
@@ -398,5 +398,196 @@ def control_plane_ui():
       refreshAll();
     </script>
   </body>
+</html>
+"""
+
+
+@router.get("/architecture/data")
+def architecture_data(request: Request):
+    return request.app.state.k8s_monitor_service.cluster_architecture()
+
+
+@router.get("/architecture/ui", response_class=HTMLResponse)
+def architecture_ui_page():
+    return _ARCHITECTURE_HTML
+
+
+_ARCHITECTURE_HTML = """
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cluster architecture</title>
+  <style>
+    :root {
+      --navbar: #3C5A3E;
+      --major: #FAF9F6;
+      --ink: #172016;
+      --muted: #4a5b49;
+      --card: #ffffff;
+      --border: #dbe5d7;
+      --shadow: rgba(0,0,0,0.07);
+      --accent-cp: #2d4a30;
+      --accent-w1: #4a6b4e;
+      --accent-w2: #5f7d63;
+      --phase-ok: #1f6b3a;
+      --phase-warn: #b8860b;
+      --phase-bad: #b23c3c;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: Segoe UI, Arial, sans-serif; margin: 0; background: var(--major); color: var(--ink); min-height: 100vh; }
+    .wrap { max-width: 1400px; margin: 0 auto; padding: 16px; }
+    .top {
+      display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap;
+      margin-bottom: 16px; padding: 14px 18px; border-radius: 14px; background: var(--navbar); color: var(--major);
+      box-shadow: 0 4px 20px var(--shadow);
+    }
+    .top h1 { margin: 0; font-size: 1.35rem; font-weight: 800; letter-spacing: 0.02em; }
+    .top .sub { margin: 6px 0 0; font-size: 0.85rem; opacity: 0.92; max-width: 520px; line-height: 1.4; }
+    .top a { color: rgba(250,249,246,0.95); text-decoration: underline; }
+    .btn { border: 1px solid rgba(250,249,246,0.35); background: transparent; color: var(--major); border-radius: 10px; padding: 8px 14px; cursor: pointer; font-size: 0.9rem; }
+    .btn:hover { background: rgba(255,255,255,0.08); }
+    .legend { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 14px; font-size: 0.8rem; color: var(--muted); }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .nodes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin-bottom: 22px; }
+    .node-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+      box-shadow: 0 2px 14px var(--shadow);
+    }
+    .node-head {
+      padding: 12px 14px; color: #fff; font-weight: 700; font-size: 0.95rem;
+      display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
+    }
+    .node-head.cp { background: linear-gradient(135deg, var(--accent-cp), #3C5A3E); }
+    .node-head.worker { background: linear-gradient(135deg, var(--accent-w1), var(--accent-w2)); }
+    .node-head.pending { background: linear-gradient(135deg, #8a7a40, #a8944a); }
+    .node-meta { font-size: 0.72rem; font-weight: 500; opacity: 0.92; margin-top: 4px; }
+    .node-body { padding: 10px 12px 14px; }
+    .ns-block { margin-bottom: 12px; border-left: 4px solid #8fbc8f; padding: 8px 10px 10px; background: #f7faf6; border-radius: 0 10px 10px 0; }
+    .ns-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; margin-bottom: 6px; }
+    .pod-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pod {
+      font-size: 0.72rem; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--border);
+      background: #fff; max-width: 100%; word-break: break-all;
+    }
+    .pod .app { font-weight: 600; color: var(--ink); }
+    .pod .phase { font-size: 0.65rem; margin-top: 2px; }
+    .phase-Running { color: var(--phase-ok); font-weight: 600; }
+    .phase-Pending, .phase-ContainerCreating { color: var(--phase-warn); }
+    .phase-Failed, .phase-Unknown, .phase-CrashLoopBackOff, .phase-ErrImagePull, .phase-ImagePullBackOff { color: var(--phase-bad); }
+    .svc-section { margin-top: 8px; }
+    .svc-section h2 { font-size: 1rem; margin: 0 0 10px; color: var(--ink); }
+    .svc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+    .svc-ns { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+    .svc-ns .ns { font-weight: 700; font-size: 0.85rem; margin-bottom: 8px; color: #2a3a2a; }
+    .svc-line { font-size: 0.75rem; padding: 3px 0; border-bottom: 1px solid #eef4ec; display: flex; justify-content: space-between; gap: 8px; }
+    .svc-line:last-child { border-bottom: none; }
+    .err { padding: 14px; background: #fff3f0; border: 1px solid #e8c4bc; border-radius: 12px; color: #6b2a2a; }
+    .empty { color: var(--muted); font-size: 0.9rem; padding: 20px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1>Cluster architecture</h1>
+        <p class="sub">Live view: nodes (control plane + workers), namespaces, pods, and ClusterIP services — same palette as the control-plane monitor.</p>
+        <p class="sub"><a href="/control-plane/ui">← Control-plane monitor</a></p>
+      </div>
+      <div><button type="button" class="btn" onclick="loadArch()">Refresh</button></div>
+    </div>
+    <div class="legend">
+      <span><span class="dot" style="background:#2d4a30"></span> Control plane</span>
+      <span><span class="dot" style="background:#5f7d63"></span> Worker</span>
+      <span><span class="dot" style="background:#c9a227"></span> Unscheduled / pending</span>
+    </div>
+    <div id="root"></div>
+  </div>
+  <script>
+    function phaseClass(ph) {
+      const p = (ph || '').replace(/[^a-zA-Z0-9_-]/g, '');
+      return 'phase-' + (p || 'Unknown');
+    }
+    function render(data) {
+      const root = document.getElementById('root');
+      if (data.error === 'not_in_cluster') {
+        root.innerHTML = '<div class="err">Not running in-cluster (no K8s credentials). Deploy audit-service inside the cluster to see this map.</div>';
+        return;
+      }
+      if (data.message && (data.error === 'kubernetes_api' || !((data.nodes || []).length))) {
+        root.innerHTML = '<div class="err">' + escapeHtml(data.message) + '<br/><br/><span style="font-size:0.85rem">Fix: kubectl apply -f audit-service.yaml (ClusterRole) then kubectl rollout restart -n ecommerce deployment/audit-service</span></div>';
+        return;
+      }
+      const nodes = data.nodes || [];
+      const svcMap = data.services_by_namespace || {};
+      if (!nodes.length) {
+        root.innerHTML = '<div class="empty">No nodes reported.</div>';
+        return;
+      }
+      let html = '<div class="nodes-grid">';
+      for (const node of nodes) {
+        const role = node.role || '';
+        const headClass = role === 'control-plane' ? 'cp' : (role === 'pending' ? 'pending' : 'worker');
+        const label = node.hpe_node_name || node.hpe_node_group || '';
+        const sub = [label && ('Label: ' + label), 'role: ' + role].filter(Boolean).join(' · ');
+        html += '<div class="node-card"><div class="node-head ' + headClass + '"><div><div>' + escapeHtml(node.name) + '</div>';
+        if (sub) html += '<div class="node-meta">' + escapeHtml(sub) + '</div>';
+        html += '</div></div><div class="node-body">';
+        const nss = node.namespaces || [];
+        if (!nss.length) {
+          html += '<div class="empty" style="padding:12px;">No workloads on this node.</div>';
+        } else {
+          for (const block of nss) {
+            html += '<div class="ns-block"><div class="ns-title">' + escapeHtml(block.name) + '</div><div class="pod-row">';
+            for (const pod of (block.pods || [])) {
+              const app = pod.app || pod.name;
+              html += '<div class="pod"><div class="app">' + escapeHtml(app) + '</div>';
+              html += '<div class="phase ' + phaseClass(pod.phase) + '">' + escapeHtml(pod.phase) + '</div>';
+              html += '<div style="font-size:0.65rem;color:#888;margin-top:2px;">' + escapeHtml(pod.name) + '</div></div>';
+            }
+            html += '</div></div>';
+          }
+        }
+        html += '</div></div>';
+      }
+      html += '</div>';
+      html += '<div class="svc-section"><h2>Services by namespace</h2><div class="svc-grid">';
+      const nsKeys = Object.keys(svcMap).sort();
+      if (!nsKeys.length) {
+        html += '<div class="empty">No services (or only default/kubernetes).</div>';
+      } else {
+        for (const ns of nsKeys) {
+          html += '<div class="svc-ns"><div class="ns">' + escapeHtml(ns) + '</div>';
+          for (const s of svcMap[ns]) {
+            html += '<div class="svc-line"><span>' + escapeHtml(s.name) + '</span><span style="color:#888">' + escapeHtml(s.type) + '</span></div>';
+          }
+          html += '</div>';
+        }
+      }
+      html += '</div></div>';
+      root.innerHTML = html;
+    }
+    function escapeHtml(t) {
+      if (!t) return '';
+      const d = document.createElement('div');
+      d.textContent = t;
+      return d.innerHTML;
+    }
+    async function loadArch() {
+      const root = document.getElementById('root');
+      root.innerHTML = '<div class="empty">Loading…</div>';
+      try {
+        const r = await fetch('/control-plane/architecture/data');
+        const data = await r.json();
+        render(data);
+      } catch (e) {
+        root.innerHTML = '<div class="err">Failed to load: ' + escapeHtml(String(e)) + '</div>';
+      }
+    }
+    loadArch();
+  </script>
+</body>
 </html>
 """

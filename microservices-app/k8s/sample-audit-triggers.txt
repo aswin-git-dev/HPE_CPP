@@ -1,0 +1,104 @@
+== HPE Control-Plane Monitor — Sample Audit Trigger Commands ==
+Run in a terminal where "kubectl" points at your Minikube cluster.
+Port-forward must be running (run-project.bat opens pf-audit on 18015).
+
+IMPORTANT (Windows):
+- These samples work best in **Command Prompt (cmd.exe)**.
+- If you use **PowerShell**, use the "PowerShell" variants shown where noted.
+
+-----------------------------------------------------------------
+URLs (paste in browser after port-forward is up)
+-----------------------------------------------------------------
+  Monitor UI       http://127.0.0.1:18015/control-plane/ui
+  Architecture map http://127.0.0.1:18015/control-plane/architecture/ui
+  HPE JSON         http://127.0.0.1:18015/control-plane/events/hpe?limit=50
+  Raw events       http://127.0.0.1:18015/control-plane/events
+
+If a URL shows "Not Found" or JSON error, rebuild audit-service and redeploy:
+  cd microservices-app\k8s
+  minikube image build -t audit-service:latest ..\audit-service
+  (then distribute image to m02/m03 per run-project.bat, or run full bat)
+
+-----------------------------------------------------------------
+1. NAMESPACE create + delete
+-----------------------------------------------------------------
+kubectl create namespace demo-audit-ns
+kubectl delete namespace demo-audit-ns
+
+-----------------------------------------------------------------
+2. SECRET create + delete
+-----------------------------------------------------------------
+kubectl -n ecommerce create secret generic demo-secret --from-literal=password=test123
+kubectl -n ecommerce delete secret demo-secret
+
+-----------------------------------------------------------------
+3. CONFIGMAP create + patch + delete
+-----------------------------------------------------------------
+kubectl -n ecommerce create configmap demo-cm --from-literal=env=dev
+
+CMD (one line):
+kubectl -n ecommerce patch configmap demo-cm -p "{\"data\":{\"env\":\"prod\"}}"
+
+PowerShell (use single quotes around JSON):
+kubectl -n ecommerce patch configmap demo-cm -p '{"data":{"env":"prod"}}'
+
+kubectl -n ecommerce delete configmap demo-cm
+
+-----------------------------------------------------------------
+4. POD lifecycle
+-----------------------------------------------------------------
+kubectl -n ecommerce run demo-pod --image=busybox:1.36 --restart=Never -- sleep 30
+kubectl -n ecommerce delete pod demo-pod --grace-period=0
+
+-----------------------------------------------------------------
+5. DEPLOYMENT scale
+-----------------------------------------------------------------
+kubectl -n ecommerce scale deployment audit-service --replicas=2
+kubectl -n ecommerce scale deployment audit-service --replicas=1
+
+-----------------------------------------------------------------
+6. RBAC demo
+-----------------------------------------------------------------
+kubectl create namespace rbac-demo
+kubectl -n rbac-demo create serviceaccount demo-sa
+kubectl create clusterrolebinding demo-crb --clusterrole=view --serviceaccount=rbac-demo:demo-sa
+kubectl delete clusterrolebinding demo-crb
+kubectl delete namespace rbac-demo
+
+-----------------------------------------------------------------
+7. EXEC (audit pods/exec)
+-----------------------------------------------------------------
+CMD:
+kubectl -n ecommerce exec deployment/audit-service -- python -c "print('audit exec test')"
+
+PowerShell (avoid nested double-quotes):
+kubectl -n ecommerce exec deployment/audit-service -- python -c 'print("audit exec test")'
+
+-----------------------------------------------------------------
+8. AUTH can-i
+-----------------------------------------------------------------
+kubectl auth can-i create secrets -n ecommerce
+kubectl auth can-i delete pods -n kube-system
+kubectl auth can-i --list -n ecommerce
+
+-----------------------------------------------------------------
+9. Bulk namespaces (CMD only — type exactly in cmd.exe)
+-----------------------------------------------------------------
+for %i in (ns-alpha ns-beta ns-gamma) do @kubectl create namespace %i
+for %i in (ns-alpha ns-beta ns-gamma) do @kubectl delete namespace %i
+
+PowerShell equivalent (run line by line):
+  foreach ($n in 'ns-alpha','ns-beta','ns-gamma') { kubectl create namespace $n }
+  foreach ($n in 'ns-alpha','ns-beta','ns-gamma') { kubectl delete namespace $n }
+
+-----------------------------------------------------------------
+10. Batch namespace demo
+-----------------------------------------------------------------
+kubectl create namespace batch-demo
+kubectl -n batch-demo create configmap cfg1 --from-literal=x=1
+kubectl -n batch-demo create secret generic sec1 --from-literal=k=v
+kubectl -n batch-demo run p1 --image=busybox:1.36 --restart=Never -- sleep 5
+kubectl -n batch-demo delete pod p1 --grace-period=0
+kubectl delete namespace batch-demo
+
+-----------------------------------------------------------------

@@ -1,5 +1,4 @@
-# ─── Product Service Deployment (Stub) ─────────────────────────────────────────
-# 2 replicas spread across nodes via anti-affinity + topology spread
+# ─── Product Service Deployment ─── WorkerNode1 ─────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,25 +23,17 @@ spec:
         app: product-service
         tier: backend
     spec:
-      topologySpreadConstraints:
-        - maxSkew: 1
-          topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: ScheduleAnyway
-          labelSelector:
-            matchLabels:
-              app: product-service
       affinity:
-        podAntiAffinity:
+        nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchExpressions:
-                    - key: app
-                      operator: In
-                      values:
-                        - product-service
-                topologyKey: kubernetes.io/hostname
+              preference:
+                matchExpressions:
+                  - key: hpe/node-group
+                    operator: In
+                    values:
+                      - worker1
+
       containers:
         - name: product-service
           image: product-service:latest

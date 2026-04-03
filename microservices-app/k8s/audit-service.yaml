@@ -7,6 +7,10 @@ metadata:
     app: audit-service
 spec:
   replicas: 1
+  # Single replica: Recreate avoids "old replica pending termination" sitting forever during
+  # rolling updates (common on Minikube). Brief downtime on deploy is OK for dev.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: audit-service
@@ -15,7 +19,18 @@ spec:
       labels:
         app: audit-service
     spec:
+      terminationGracePeriodSeconds: 15
       serviceAccountName: audit-service-monitor
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: hpe/node-group
+                    operator: In
+                    values:
+                      - worker2
       containers:
       - name: audit-service
         image: audit-service:latest
@@ -44,7 +59,7 @@ metadata:
   name: audit-service-monitor-reader
 rules:
   - apiGroups: [""]
-    resources: ["pods", "namespaces"]
+    resources: ["pods", "namespaces", "nodes", "services"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

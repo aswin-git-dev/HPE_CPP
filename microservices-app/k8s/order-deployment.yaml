@@ -1,4 +1,4 @@
-# ─── Order Service Deployment (Stub) ───────────────────────────────────────────
+# ─── Order Service Deployment ─── WorkerNode2 ───────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,25 +23,17 @@ spec:
         app: order-service
         tier: backend
     spec:
-      topologySpreadConstraints:
-        - maxSkew: 1
-          topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: ScheduleAnyway
-          labelSelector:
-            matchLabels:
-              app: order-service
       affinity:
-        podAntiAffinity:
+        nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchExpressions:
-                    - key: app
-                      operator: In
-                      values:
-                        - order-service
-                topologyKey: kubernetes.io/hostname
+              preference:
+                matchExpressions:
+                  - key: hpe/node-group
+                    operator: In
+                    values:
+                      - worker2
+
       containers:
         - name: order-service
           image: order-service:latest

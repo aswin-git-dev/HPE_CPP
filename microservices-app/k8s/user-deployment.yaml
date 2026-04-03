@@ -1,6 +1,4 @@
-# ─── User Service Deployment ───────────────────────────────────────────────────
-# Multi-node, multi-pod: 3 replicas spread across nodes via anti-affinity
-# and topology spread constraints.
+# ─── User Service Deployment ─── WorkerNode1 ────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,15 +9,15 @@ metadata:
     version: "1.0.0"
     tier: backend
 spec:
-  replicas: 3                          # 3 pods across multiple nodes
+  replicas: 2
   selector:
     matchLabels:
       app: user-service
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1                      # Allow 1 extra pod during update
-      maxUnavailable: 0                # Zero-downtime rolling update
+      maxSurge: 1
+      maxUnavailable: 0
   template:
     metadata:
       labels:
@@ -27,49 +25,29 @@ spec:
         version: "1.0.0"
         tier: backend
     spec:
-      # ── Spread pods evenly across nodes ─────────────────────────────────
-      topologySpreadConstraints:
-        - maxSkew: 1
-          topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: DoNotSchedule
-          labelSelector:
-            matchLabels:
-              app: user-service
-
-      # ── Anti-affinity + node preference combined ─────────────────────────
+      # Prefer WorkerNode1 when labels exist; still schedules on 1-node clusters (no Pending loop)
       affinity:
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 80
+            - weight: 100
               preference:
                 matchExpressions:
-                  - key: node-role.kubernetes.io/worker
-                    operator: Exists
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchExpressions:
-                    - key: app
-                      operator: In
-                      values:
-                        - user-service
-                topologyKey: kubernetes.io/hostname
+                  - key: hpe/node-group
+                    operator: In
+                    values:
+                      - worker1
 
-      # ── Graceful termination ─────────────────────────────────────────────
       terminationGracePeriodSeconds: 30
 
       containers:
         - name: user-service
-          image: user-service:latest        # Replace with your registry image
-          imagePullPolicy: IfNotPresent     # Change to Always for production registry
+          image: user-service:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
               name: http
               protocol: TCP
 
-          # ── Environment Variables ──────────────────────────────────────
           env:
             - name: MONGO_URL
               value: "mongodb://mongodb-service.ecommerce.svc.cluster.local:27017"
@@ -88,12 +66,10 @@ spec:
                 fieldRef:
                   fieldPath: spec.nodeName
 
-          # ── Resource Requests/Limits (enables proper node scheduling) ──
           resources:
             requests:
-              cpu: "100m"               # 0.1 CPU core guaranteed
-              memory: "128Mi"           # 128MB RAM guaranteed
+              cpu: "100m"
+              memory: "128Mi"
             limits:
-              cpu: "500m"               # Max 0.5 CPU core
-              memory: "256Mi"           # Max 256MB RAM
-
+              cpu: "500m"
+              memory: "256Mi"
