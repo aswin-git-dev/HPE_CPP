@@ -236,21 +236,45 @@ echo.
 echo ============================================================
 echo  ALL DONE - keep the pf-* windows open!
 echo ============================================================
-echo   Control-Plane Monitor UI  :  http://127.0.0.1:18015/control-plane/ui
-echo   HPE Audit Events JSON     :  http://127.0.0.1:18015/control-plane/events/hpe?limit=50
-echo   User service              :  http://127.0.0.1:18100
-echo   Product service           :  http://127.0.0.1:18101
-echo   Order service             :  http://127.0.0.1:18102
-echo   Payment service           :  http://127.0.0.1:18103
-echo   Notification service      :  http://127.0.0.1:18104
+echo.
+echo   [Monitor UI]       http://127.0.0.1:18015/control-plane/ui
+echo   [Architecture]     http://127.0.0.1:18015/control-plane/architecture/ui
+echo   [HPE Audit JSON]   http://127.0.0.1:18015/control-plane/events/hpe?limit=50
+echo   [Raw Events JSON]  http://127.0.0.1:18015/control-plane/events
+echo.
+echo   [User service]         http://127.0.0.1:18100
+echo   [Product service]      http://127.0.0.1:18101
+echo   [Order service]        http://127.0.0.1:18102
+echo   [Payment service]      http://127.0.0.1:18103
+echo   [Notification service] http://127.0.0.1:18104
 echo ============================================================
 echo.
-echo Trigger test audit events:
-echo   kubectl create namespace demo-ns ^&^& kubectl delete namespace demo-ns
+
+REM ── Auto-open browser tabs (skip if SKIP_BROWSER=1) ─────────────────────
+if /I "%SKIP_BROWSER%"=="1" (
+  echo      SKIP_BROWSER=1 - skipping auto-open.
+  goto skip_browser
+)
+echo      Opening browser tabs...
+timeout /t 3 /nobreak >nul
+start "" "http://127.0.0.1:18015/control-plane/ui"
+timeout /t 1 /nobreak >nul
+start "" "http://127.0.0.1:18015/control-plane/architecture/ui"
+:skip_browser
+
+echo.
+echo Trigger quick test audit events (copy + paste in a new terminal):
+echo   kubectl create namespace demo-audit-ns
+echo   kubectl -n ecommerce create secret generic demo-secret --from-literal=pw=test123
+echo   kubectl -n ecommerce exec deployment/audit-service -- python -c "print('exec-test')"
+echo   kubectl delete namespace demo-audit-ns
+echo   kubectl -n ecommerce delete secret demo-secret
 echo.
 echo TIPs:
-echo   SET SKIP_IMAGE_BUILD=1 ^&^& run-project.bat     - skip image builds
-echo   SET SKIP_AUDIT_WAIT=1 ^&^& run-project.bat      - skip rollout wait at step 5
+echo   SET SKIP_IMAGE_BUILD=1    skip Docker image builds on re-run
+echo   SET SKIP_AUDIT_WAIT=1     skip rollout wait at step 5
+echo   SET SKIP_BROWSER=1        skip auto-opening browser tabs
+echo   See sample-audit-triggers.txt for full event + classification catalog
 echo.
 echo This window stays open. Type EXIT to close.
 cmd /k

@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>HPE Control-Plane Monitor (sample)</title>
+  <!--
+    Sample layout: black SVG icons (no emoji), audit events full-width table.
+    Live twin: audit-service GET /control-plane/ui → control_plane.py
+  -->
+  <style>
+    :root {
+      --green:   #3C5A3E;
+      --green2:  #2d4a30;
+      --cream:   #FAF9F6;
+      --ink:     #172016;
+      --icon:    #000000;
+      --muted:   #4a5b49;
+      --card:    #ffffff;
+      --border:  #dbe5d7;
+      --shadow:  rgba(0,0,0,0.07);
+      --ok-bg:   #eaf8ef; --ok-txt:  #1a5e32; --ok-bdr:  #a8d9b8;
+      --warn-bg: #fff7e6; --warn-txt:#7a4a00; --warn-bdr:#f0c070;
+      --err-bg:  #fff0f0; --err-txt: #a02020; --err-bdr: #f0aaaa;
+      --tag-bg:  #f0f7f0; --tag-txt: #2d4a30; --tag-bdr: #b8d4b8;
+    }
+    *{box-sizing:border-box;}
+    body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:var(--cream);color:var(--ink);}
+    a{color:var(--green);text-decoration:none;}
+    .demo-banner{background:#e8f5e8;border-bottom:1px solid var(--border);padding:10px 20px;font-size:.85rem;color:var(--green2);text-align:center;}
+    .demo-banner code{background:#fff;padding:2px 6px;border-radius:4px;border:1px solid var(--border);}
+    .navbar{background:var(--green);color:var(--cream);padding:0 20px;display:flex;align-items:center;justify-content:space-between;min-height:56px;box-shadow:0 2px 12px rgba(0,0,0,0.18);}
+    .navbar .brand{font-size:1.1rem;font-weight:800;letter-spacing:.02em;display:flex;align-items:center;gap:10px;}
+    .navbar .brand svg{opacity:.9;}
+    .navbar .nav-links{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+    .nav-btn{background:transparent;color:rgba(250,249,246,.9);border:1px solid rgba(250,249,246,.35);border-radius:8px;padding:6px 14px;cursor:pointer;font-size:.85rem;transition:background .15s;display:inline-flex;align-items:center;gap:6px;}
+    .nav-btn:hover{background:rgba(255,255,255,.12);}
+    .nav-btn.primary{background:var(--cream);color:var(--green);font-weight:700;border-color:var(--cream);}
+    .nav-btn.primary:hover{background:#eef5ee;}
+    .nav-btn svg{stroke:rgba(250,249,246,.95);fill:none;}
+    .nav-btn.primary svg{stroke:var(--green);}
+    .wrap{max-width:1400px;margin:0 auto;padding:20px 16px;}
+
+    /* Stats — pure black icons */
+    .stats-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:18px;}
+    .stat-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;box-shadow:0 2px 10px var(--shadow);display:flex;flex-direction:column;gap:6px;}
+    .stat-card .stat-icon{display:flex;align-items:center;justify-content:flex-start;height:26px;}
+    .stat-card .stat-icon svg{stroke:var(--icon);fill:none;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round;}
+    .stat-card .stat-val{font-size:1.5rem;font-weight:800;color:var(--green2);line-height:1.1;}
+    .stat-card .stat-lbl{font-size:.72rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;}
+
+    .section{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:0 2px 14px var(--shadow);overflow:hidden;margin-bottom:16px;}
+    .section-head{background:linear-gradient(135deg,var(--green2),var(--green));color:var(--cream);padding:12px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;}
+    .section-head .title{font-weight:700;font-size:.95rem;display:flex;align-items:center;gap:8px;}
+    .section-head .title svg{stroke:rgba(250,249,246,.92);fill:none;stroke-width:1.5;}
+    .filterbar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;padding:12px 16px;background:#f6faf5;border-bottom:1px solid var(--border);}
+    .fgroup{display:flex;flex-direction:column;gap:4px;}
+    .fgroup label{font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+    .fgroup select,.fgroup input{border:1px solid var(--border);background:var(--card);color:var(--ink);border-radius:8px;padding:6px 10px;font-size:.82rem;min-width:120px;}
+    .fgroup input{min-width:180px;flex:1;}
+    .apply-btn{background:var(--green);color:var(--cream);border:none;border-radius:8px;padding:7px 18px;cursor:pointer;font-size:.85rem;font-weight:700;align-self:flex-end;transition:background .15s;}
+    .apply-btn:hover{background:var(--green2);}
+
+    /* Pods: unified table with sticky head — guarantees alignment */
+    .tbl-wrap--pods{
+      box-sizing:border-box;
+      overflow-x:hidden;overflow-y:auto;max-height:380px;scrollbar-gutter:stable;padding:0 8px;
+      border-bottom:1px solid var(--border);
+    }
+    table.tbl-data.tbl-pods{width:100%;margin:0;border-collapse:collapse;table-layout:fixed!important;}
+    table.tbl-data.tbl-pods td, table.tbl-data.tbl-pods th{ word-break:break-all!important; white-space:normal!important; }
+    /* Audit: single table + sticky thead */
+    .tbl-wrap--audit{overflow-x:hidden;overflow-y:auto;max-height:min(520px,55vh);scrollbar-gutter:stable;padding:0 8px;}
+    table.tbl-data{
+      width:100%;max-width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;
+    }
+    table.tbl-data colgroup col{min-width:0;}
+    table.tbl-data th,table.tbl-data td{
+      padding:8px 10px;text-align:left;vertical-align:middle;font-size:.8rem;
+      border-bottom:1px solid #edf4eb;word-wrap:break-word;overflow-wrap:anywhere;
+    }
+    /* UA stylesheet centers th; force same alignment as body cells for live + file views */
+    table.tbl-data thead th{
+      text-align:left;
+      position:sticky;top:0;z-index:2;
+      background:var(--cream);
+      padding-top:9px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);
+      border-bottom:2px solid var(--border);
+      box-shadow:none;
+    }
+    table.tbl-data td{min-width:0;}
+    table.tbl-data tbody tr{transition:background .12s;}
+    table.tbl-data tbody tr:hover{background:#f3faf2;}
+    table.tbl-data tbody tr.selected{background:#e8f5e8;}
+    table.tbl-data tbody tr.clickable{cursor:pointer;}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.7rem;font-weight:600;border:1px solid;line-height:1.3;}
+    .pill.ok{background:var(--ok-bg);color:var(--ok-txt);border-color:var(--ok-bdr);}
+    .pill.warn{background:var(--warn-bg);color:var(--warn-txt);border-color:var(--warn-bdr);}
+    .pill.err{background:var(--err-bg);color:var(--err-txt);border-color:var(--err-bdr);}
+    .pill.tag{background:var(--tag-bg);color:var(--tag-txt);border-color:var(--tag-bdr);}
+    .cls-rbac{background:#fff3e8;color:#7a3d00;border-color:#f0b870;}
+    .cls-secret{background:#f3e8ff;color:#4a1a7a;border-color:#c9a0f0;}
+    .cls-exec{background:#e8f3ff;color:#1a3a7a;border-color:#90b8f0;}
+    .cls-priv{background:#fff0f8;color:#7a1a5a;border-color:#f090c8;}
+    .cls-config{background:#e8fff3;color:#0a5a2a;border-color:#70e0a8;}
+    .cls-destruct{background:#fff0e8;color:#7a2a00;border-color:#f0a070;}
+    .cls-unauth{background:var(--err-bg);color:var(--err-txt);border-color:var(--err-bdr);}
+    .cls-webhook{background:#f8f0ff;color:#5a1a8a;border-color:#d0a0f8;}
+
+    .detail-panel{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:0 2px 14px var(--shadow);overflow:hidden;margin-bottom:16px;}
+    .detail-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0;border-top:1px solid var(--border);}
+    .detail-field{padding:12px 16px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);}
+    .detail-label{font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;display:flex;align-items:center;gap:6px;}
+    .detail-label .ic-b{flex-shrink:0;width:16px;height:16px;display:block;}
+    .detail-label .ic-b path,.detail-label .ic-b circle,.detail-label .ic-b line,.detail-label .ic-b rect{stroke:var(--icon);fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;}
+    .detail-value{font-size:.84rem;color:var(--ink);font-weight:500;word-break:break-word;}
+    .detail-value.empty{color:#aaa;font-style:italic;}
+    .json-wrap{background:#f8fcf8;border:1px solid var(--border);border-radius:10px;padding:14px;font-family:Consolas,'Courier New',monospace;font-size:.78rem;white-space:pre-wrap;word-break:break-all;max-height:340px;overflow:auto;color:#1a2a1a;}
+    .mono{font-family:Consolas,'Courier New',monospace;}
+    .muted{color:var(--muted);font-size:.8rem;}
+    .toast{position:fixed;right:20px;bottom:20px;background:var(--green2);color:#fff;padding:10px 16px;border-radius:10px;opacity:0;transition:opacity .15s;font-size:.82rem;pointer-events:none;z-index:999;}
+    .limit-row{display:flex;align-items:center;gap:8px;}
+    .limit-row input{border:1px solid rgba(250,249,246,.4);background:rgba(255,255,255,.15);color:var(--cream);border-radius:8px;padding:5px 10px;width:72px;font-size:.85rem;}
+    .limit-row label{font-size:.8rem;color:rgba(250,249,246,.85);}
+  </style>
+</head>
+<body>
+<div class="demo-banner" id="demoBanner" style="display:none;">
+  <strong>Sample / demo mode</strong> — mock data. Live:
+  <code>http://127.0.0.1:18015/control-plane/ui</code>
+</div>
+<nav class="navbar">
+  <div class="brand">
+    <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+      <circle cx="11" cy="11" r="10" stroke="rgba(250,249,246,0.7)" stroke-width="1.5"/>
+      <path d="M6 11.5 L9.5 15 L16 8" stroke="rgba(250,249,246,0.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    HPE K8s Security Monitor
+  </div>
+  <div class="nav-links">
+    <div class="limit-row">
+      <label>Limit</label>
+      <input id="limit" type="number" min="1" max="500" value="50"/>
+    </div>
+    <button class="nav-btn" type="button" onclick="refreshAll()">
+      <svg width="14" height="14" viewBox="0 0 24 24" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+      Refresh
+    </button>
+    <a id="archLink" href="/control-plane/architecture/ui"><button class="nav-btn primary" type="button">
+      <svg width="14" height="14" viewBox="0 0 24 24" stroke-width="2"><path d="M7 17L17 7M7 7h10v10"/></svg>
+      Architecture
+    </button></a>
+  </div>
+</nav>
+
+<div class="wrap">
+  <!-- Black SVG stat icons (Lucide-style, stroke #000) -->
+  <div class="stats-row" id="statsRow">
+    <div class="stat-card">
+      <div class="stat-icon" title="Namespaces"><svg width="22" height="22" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+      <div class="stat-val" id="stNamespaces">—</div><div class="stat-lbl">Namespaces</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" title="Pods"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></div>
+      <div class="stat-val" id="stPods">—</div><div class="stat-lbl">Total Pods</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" title="Running"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
+      <div class="stat-val" id="stRunning">—</div><div class="stat-lbl">Running</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" title="Audit events"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M9 14h6M9 18h6M9 10h2"/></svg></div>
+      <div class="stat-val" id="stEvents">—</div><div class="stat-lbl">Audit Events</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" title="Failures"><svg width="22" height="22" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+      <div class="stat-val" id="stFailures">—</div><div class="stat-lbl">Failures</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" title="Unauthorized"><svg width="22" height="22" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+      <div class="stat-val" id="stUnauth">—</div><div class="stat-lbl">Unauthorized</div>
+    </div>
+  </div>
+
+  <!-- Row 1: Pods only (full width) -->
+  <div class="section">
+    <div class="section-head">
+      <div class="title">
+        <svg width="16" height="16" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Pods by Namespace
+      </div>
+      <span class="muted" style="color:rgba(250,249,246,.7);font-size:.75rem;" id="podsMeta"></span>
+    </div>
+    <div class="tbl-wrap tbl-wrap--pods">
+      <table class="tbl-data tbl-pods">
+        <colgroup>
+          <col style="width:14%"/><col style="width:32%"/><col style="width:12%"/><col style="width:18%"/><col style="width:24%"/>
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col" style="width:14%">Namespace</th>
+            <th scope="col" style="width:32%">Pod</th>
+            <th scope="col" class="col-status" style="width:12%">Status</th>
+            <th scope="col" style="width:18%">Node</th>
+            <th scope="col" style="width:24%">IP</th>
+          </tr>
+        </thead>
+        <tbody id="podsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Row 2: Audit events — full-width table (all columns visible) -->
+  <div class="section">
+    <div class="section-head">
+      <div class="title">
+        <svg width="16" height="16" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="13"/><line x1="10" y1="9" x2="8" y2="9"/></svg>
+        Audit Events
+      </div>
+      <span class="muted" style="color:rgba(250,249,246,.7);font-size:.75rem;" id="eventsMeta"></span>
+    </div>
+    <div class="filterbar">
+      <div class="fgroup"><label>Namespace</label><select id="nsFilter"><option value="all">All</option></select></div>
+      <div class="fgroup"><label>Resource</label><select id="resourceFilter"><option value="all">All</option></select></div>
+      <div class="fgroup"><label>Result</label>
+        <select id="resultFilter"><option value="all">All</option><option value="Success">Success</option><option value="Failure">Failure</option></select>
+      </div>
+      <div class="fgroup"><label>Classification</label>
+        <select id="classFilter">
+          <option value="all">All</option>
+          <option value="rbac_change">rbac_change</option>
+          <option value="secret_access">secret_access</option>
+          <option value="exec_access">exec_access</option>
+          <option value="privilege_escalation_candidate">privilege_escalation</option>
+          <option value="config_change">config_change</option>
+          <option value="destructive_change">destructive_change</option>
+          <option value="unauthorized_access">unauthorized_access</option>
+        </select>
+      </div>
+      <div class="fgroup" style="flex:2;min-width:220px;">
+        <label>Search</label>
+        <input id="qFilter" type="text" placeholder="user / method / resource / uri…"/>
+      </div>
+      <button class="apply-btn" type="button" onclick="renderEvents()">Apply</button>
+    </div>
+    <p class="audit-hint" style="margin:0;padding:8px 16px 10px;font-size:.78rem;color:var(--muted);border-bottom:1px solid var(--border);background:#fafcf9;line-height:1.45;">
+      Shows recent API traffic from the whole cluster (nodes, controllers, and users). Search for <code style="font-size:.85em;">sec-demo</code> or <code style="font-size:.85em;">escalation-sa</code>, or filter by namespace. Click a row to open details — <strong>Copy JSON</strong> copies the full payload.
+    </p>
+    <div class="tbl-wrap tbl-wrap--audit">
+      <table class="tbl-data tbl-audit">
+        <colgroup>
+          <col style="width:17%"/><col style="width:22%"/><col style="width:15%"/><col style="width:12%"/><col style="width:18%"/><col style="width:16%"/>
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col">Time (IST)</th>
+            <th scope="col">Resource · Verb</th>
+            <th scope="col">User</th>
+            <th scope="col">Stage</th>
+            <th scope="col">Classification</th>
+            <th scope="col">Result</th>
+          </tr>
+        </thead>
+        <tbody id="eventsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="detail-panel" id="detailPanel" style="display:none;">
+    <div class="section-head">
+      <div class="title">
+        <svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        Event Detail
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="nav-btn" type="button" onclick="copyPath()"><svg width="14" height="14" viewBox="0 0 24 24" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy URL</button>
+        <button class="nav-btn" type="button" onclick="copyJson()"><svg width="14" height="14" viewBox="0 0 24 24" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy JSON</button>
+      </div>
+    </div>
+    <div class="detail-grid" id="detailGrid"></div>
+    <div style="padding:14px 16px;">
+      <div class="muted" style="margin-bottom:8px;font-weight:600;">Full Payload</div>
+      <div class="json-wrap" id="payload">Select an event row to inspect.</div>
+    </div>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
+
+<script>
+  const DEMO = window.location.protocol === 'file:' || new URLSearchParams(location.search).get('demo') === '1';
+  if (DEMO) {
+    document.getElementById('demoBanner').style.display = 'block';
+    document.getElementById('archLink').href = '#';
+    document.getElementById('archLink').onclick = function(e) { e.preventDefault(); alert('Open http://127.0.0.1:18015/control-plane/architecture/ui when the cluster is running.'); };
+  }
+
+  const MOCK_PODS = {
+    namespaces: {
+      ecommerce: [
+        { name: 'audit-service-7d8f9c-xk2lm', phase: 'Running', node: 'minikube-m03', pod_ip: '10.244.2.11' },
+        { name: 'k8s-audit-forwarder-abc12', phase: 'Running', node: 'minikube', pod_ip: '10.244.0.8' },
+      ],
+      'user-ns': [
+        { name: 'user-service-5f7d8c-xyz78', phase: 'Running', node: 'minikube-m02', pod_ip: '10.244.1.5' },
+      ],
+    },
+  };
+
+  const MOCK_EVENTS = { events: [
+    { specversion:'1.0', id:'evt-1', source:'urn:k8s:cluster:prod-cluster-01', type:'com.hpe.k8s.audit.secrets.create',
+      time:'2026-04-03T10:30:00.000Z', invocationtime:'2026-04-03T10:30:00.000Z', completetime:'2026-04-03T10:30:00.045Z',
+      dataContentType:'application/json', dataSchema:'urn:hpe:security:audit:schema:v1', securityRelevant:'yes',
+      data:{ source:{ subject:'kubernetes-admin', user:'kubernetes-admin', requestRoles:'system:masters', requestPrivileges:'create,secrets', requestingService:'kubectl/v1.29.0', requestMethod:'POST', requestUrl:'/api/v1/namespaces/ecommerce/secrets', requestSource:'192.168.49.1', requestPort:null },
+        destination:{ requestedCall:'POST /api/.../secrets', destination:'kube-apiserver', destinationPort:6443, l4protocol:'TCP', protocolBinding:'TLS', encryption:'TLS 1.3', destinationService:'kube-apiserver', destinationUserRoles:null, destinationUserPrivs:null, apiGroup:null },
+        network:{ eventLocation:'k8s-control-plane', stage:'ResponseComplete', apiCallResult:'Success', eventCount:'1', statusCode:201, classification:'secret_access', severity:'info' },
+        object:{ objname:'demo-secret', objtype:'secrets', objowner:'ecommerce', objperms:'create,secrets', objaccessresult:'Success', assertedroles:'system:masters', assertedprivs:'create,secrets', objchanges:'create secret', objcreatetime:'2026-04-03T10:30:00.000Z', objmodtime:null, objdeletetime:null }
+      }},
+    { specversion:'1.0', id:'evt-2', source:'urn:k8s:cluster:prod-cluster-01', type:'com.hpe.k8s.audit.pods.exec.create',
+      time:'2026-04-03T10:31:00.000Z', invocationtime:'2026-04-03T10:31:00.000Z', completetime:'2026-04-03T10:31:00.120Z',
+      dataContentType:'application/json', dataSchema:'urn:hpe:security:audit:schema:v1', securityRelevant:'yes',
+      data:{ source:{ subject:'kubernetes-admin', user:'kubernetes-admin', requestRoles:'system:masters', requestPrivileges:'create,pods/exec', requestingService:'kubectl/v1.29.0', requestMethod:'POST', requestUrl:'/api/v1/namespaces/ecommerce/pods/audit-service-7d8f9c-xk2lm/exec', requestSource:'192.168.49.1', requestPort:null },
+        destination:{ requestedCall:'POST …/exec', destination:'kube-apiserver', destinationPort:6443, l4protocol:'TCP', protocolBinding:'TLS', encryption:'TLS 1.3', destinationService:'kube-apiserver', destinationUserRoles:null, destinationUserPrivs:null, apiGroup:'' },
+        network:{ eventLocation:'k8s-control-plane', stage:'ResponseComplete', apiCallResult:'Success', eventCount:'1', statusCode:101, classification:'exec_access', severity:'info' },
+        object:{ objname:'audit-service-7d8f9c-xk2lm', objtype:'pods', objowner:'ecommerce', objperms:'create,pods/exec', objaccessresult:'Success', assertedroles:'system:masters', assertedprivs:'create,pods/exec', objchanges:'exec', objcreatetime:'2026-04-03T10:31:00.000Z', objmodtime:null, objdeletetime:null }
+      }},
+  ]};
+
+  let currentEvents = [];
+  let visibleEvents = [];
+  let selectedRow = null;
+
+  /* Black 16×16 line icons for detail grid (stroke only) */
+  const IC = {
+    user: '<svg class="ic-b" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20v-1a7 7 0 0 1 14 0v1"/></svg>',
+    key: '<svg class="ic-b" viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><path d="M11 11l11 11M21 21l-2-2M17 17l-2-2"/></svg>',
+    tag: '<svg class="ic-b" viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>',
+    lock: '<svg class="ic-b" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+    terminal: '<svg class="ic-b" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
+    radio: '<svg class="ic-b" viewBox="0 0 24 24"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>',
+    link: '<svg class="ic-b" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+    mapPin: '<svg class="ic-b" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',
+    flag: '<svg class="ic-b" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>',
+    hash: '<svg class="ic-b" viewBox="0 0 24 24"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>',
+    shield: '<svg class="ic-b" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+    folder: '<svg class="ic-b" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+    layers: '<svg class="ic-b" viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
+    home: '<svg class="ic-b" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
+    fileText: '<svg class="ic-b" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>',
+    barChart: '<svg class="ic-b" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
+    check: '<svg class="ic-b" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+    clock: '<svg class="ic-b" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+  };
+
+  function esc(v){ return (v??'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function toast(msg){
+    const t=document.getElementById('toast');
+    t.textContent=msg; t.style.opacity=1;
+    setTimeout(()=>{t.style.opacity=0;},1500);
+  }
+  function formatIst(ts){
+    if(!ts) return '';
+    const d=new Date(ts);
+    if(Number.isNaN(d.getTime())) return ts;
+    return new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true}).format(d)+' IST';
+  }
+  function clsCss(cls){
+    const m={rbac_change:'cls-rbac',secret_access:'cls-secret',exec_access:'cls-exec',
+      privilege_escalation_candidate:'cls-priv',config_change:'cls-config',
+      destructive_change:'cls-destruct',unauthorized_access:'cls-unauth',
+      admission_webhook_change:'cls-webhook'};
+    return 'pill tag '+(m[cls]||'');
+  }
+  function formatClassificationLabel(cls){
+    if(!cls) return '';
+    return String(cls).replace(/_/g,' ');
+  }
+
+  function getFilters(){
+    const pick=id=>{ const v=document.getElementById(id)?.value; return (v&&v!=='')?v:'all'; };
+    return {
+      ns: pick('nsFilter'), resource: pick('resourceFilter'),
+      result: pick('resultFilter'), classification: pick('classFilter'),
+      q: (document.getElementById('qFilter')?.value??'').trim().toLowerCase()
+    };
+  }
+  function applyFilters(events){
+    const f=getFilters();
+    return (events||[]).filter(e=>{
+      const src=e.data?.source||{}, net=e.data?.network||{}, obj=e.data?.object||{};
+      const ns=obj.objowner||'';
+      const rt=obj.objtype||'';
+      const res=net.apiCallResult||'';
+      const cls=net.classification||'';
+      if(f.ns!=='all'&&ns!==f.ns) return false;
+      if(f.resource!=='all'&&rt!==f.resource) return false;
+      if(f.result!=='all'&&res!==f.result) return false;
+      if(f.classification!=='all'&&cls!==f.classification) return false;
+      if(f.q){
+        const hay=[e.type,src.subject,src.user,src.requestMethod,src.requestUrl,
+          obj.objowner,obj.objtype,obj.objname,obj.objchanges,net.classification].join(' ').toLowerCase();
+        if(!hay.includes(f.q)) return false;
+      }
+      return true;
+    });
+  }
+
+  async function copyText(t){
+    t=t??'';
+    try{ await navigator.clipboard.writeText(t); }
+    catch{ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
+    toast('Copied!');
+  }
+  function copyPath(){ copyText(document.getElementById('payload')?.dataset?.url||''); }
+  function copyJson(){ copyText(document.getElementById('payload')?.textContent||''); }
+
+  async function refreshPods(){
+    let j;
+    if (DEMO) j = MOCK_PODS;
+    else { const r = await fetch('/control-plane/pods'); j = await r.json(); }
+    const ns=j.namespaces||{};
+    const body=document.getElementById('podsBody');
+    body.innerHTML='';
+    let total=0, running=0;
+    Object.entries(ns).sort((a,b)=>a[0].localeCompare(b[0])).forEach(([name,pods])=>{
+      (pods||[]).forEach(p=>{
+        total++;
+        const ph=(p.phase||'').toLowerCase();
+        if(ph==='running') running++;
+        const cls=ph==='running'?'ok':(ph==='pending'?'warn':'err');
+        body.innerHTML+=`<tr><td>${esc(name)}</td><td class="mono" style="font-size:.75rem;">${esc(p.name)}</td><td class="col-status"><span class="pill ${cls}">${esc(p.phase)}</span></td><td>${esc(p.node||'—')}</td><td class="mono" style="font-size:.75rem;">${esc(p.pod_ip||'—')}</td></tr>`;
+      });
+    });
+    document.getElementById('podsMeta').textContent=`${total} pods`;
+    document.getElementById('stNamespaces').textContent=Object.keys(ns).length;
+    document.getElementById('stPods').textContent=total;
+    document.getElementById('stRunning').textContent=running;
+    const nsSel=document.getElementById('nsFilter');
+    if(nsSel){
+      const cur=nsSel.value;
+      const keys=Object.keys(ns).sort((a,b)=>a.localeCompare(b));
+      nsSel.innerHTML='<option value="all">All</option>'+keys.map(k=>`<option value="${esc(k)}">${esc(k)}</option>`).join('');
+      if(cur&&keys.includes(cur)) nsSel.value=cur;
+    }
+  }
+
+  async function refreshEvents(){
+    const limit=Number(document.getElementById('limit').value||50);
+    const fetchLimit=Math.min(400,Math.max(limit,200));
+    let j;
+    if (DEMO) j = MOCK_EVENTS;
+    else { const r=await fetch(`/control-plane/events/hpe?limit=${fetchLimit}`); j = await r.json(); }
+    currentEvents=j.events||[];
+    const resourceSel=document.getElementById('resourceFilter');
+    if(resourceSel){
+      const cur=resourceSel.value;
+      const types=Array.from(new Set(currentEvents.map(e=>e.data?.object?.objtype).filter(Boolean))).sort();
+      resourceSel.innerHTML='<option value="all">All</option>'+types.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+      if(cur&&types.includes(cur)) resourceSel.value=cur;
+    }
+    renderEvents();
+  }
+
+  function renderEvents(){
+    const limit=Number(document.getElementById('limit').value||50);
+    visibleEvents=applyFilters(currentEvents).slice(0,limit);
+    const body=document.getElementById('eventsBody');
+    body.innerHTML='';
+    let failures=0, unauth=0;
+    visibleEvents.forEach((e,i)=>{
+      const src=e.data?.source||{}, net=e.data?.network||{};
+      const res=(net.apiCallResult||'').toLowerCase();
+      const cls=net.classification||'';
+      if(res!=='success') failures++;
+      if(cls==='unauthorized_access') unauth++;
+      const resCls=res==='success'?'ok':'err';
+      const resLabel=net.apiCallResult||'—';
+      const parts=(e.type||'').split('.');
+      const shortType=parts.length>=2 ? parts.slice(-2).join(' · ') : (e.type||'—');
+      const stage=net.stage||'—';
+      const clsDisplay=cls?`<span class="${clsCss(cls)}">${esc(formatClassificationLabel(cls))}</span>`:'<span style="color:#aaa">—</span>';
+      body.innerHTML+=`<tr class="clickable" onclick="showEvent(${i},this)">
+        <td>${esc(formatIst(e.time))}</td>
+        <td class="mono">${esc(shortType)}</td>
+        <td>${esc(src.subject||src.user||'—')}</td>
+        <td><span class="pill tag">${esc(stage)}</span></td>
+        <td>${clsDisplay}</td>
+        <td><span class="pill ${resCls}">${esc(resLabel)}</span></td>
+      </tr>`;
+    });
+    document.getElementById('stEvents').textContent=currentEvents.length;
+    document.getElementById('stFailures').textContent=failures;
+    document.getElementById('stUnauth').textContent=unauth;
+    document.getElementById('eventsMeta').textContent=`${visibleEvents.length} shown`;
+  }
+
+  function showEvent(i, row){
+    if(selectedRow) selectedRow.classList.remove('selected');
+    row.classList.add('selected');
+    selectedRow=row;
+
+    const e=visibleEvents[i]||{};
+    const src=e.data?.source||{}, dst=e.data?.destination||{}, net=e.data?.network||{}, obj=e.data?.object||{};
+
+    document.getElementById('detailPanel').style.display='block';
+
+    const fields=[
+      {ic:IC.user,label:'Subject',val:src.subject},
+      {ic:IC.key,label:'User / UID',val:src.user},
+      {ic:IC.tag,label:'Roles',val:src.requestRoles},
+      {ic:IC.lock,label:'Privileges',val:src.requestPrivileges},
+      {ic:IC.terminal,label:'Requesting Service',val:src.requestingService},
+      {ic:IC.radio,label:'Method',val:src.requestMethod},
+      {ic:IC.link,label:'Request URL',val:src.requestUrl},
+      {ic:IC.mapPin,label:'Source IP',val:src.requestSource},
+      {ic:IC.flag,label:'Destination',val:dst.destination},
+      {ic:IC.hash,label:'Dest Port',val:dst.destinationPort},
+      {ic:IC.shield,label:'Encryption',val:dst.encryption},
+      {ic:IC.folder,label:'Object Name',val:obj.objname},
+      {ic:IC.layers,label:'Object Type',val:obj.objtype},
+      {ic:IC.home,label:'Namespace',val:obj.objowner},
+      {ic:IC.fileText,label:'Classification',val:formatClassificationLabel(net.classification)},
+      {ic:IC.barChart,label:'Stage',val:net.stage},
+      {ic:IC.check,label:'API Result',val:net.apiCallResult},
+      {ic:IC.hash,label:'Status Code',val:net.statusCode},
+      {ic:IC.clock,label:'Invocation Time',val:e.invocationtime},
+      {ic:IC.clock,label:'Completion Time',val:e.completetime},
+    ];
+
+    document.getElementById('detailGrid').innerHTML=fields.map(f=>{
+      const v=f.val!=null?String(f.val):'';
+      const cls=v?'detail-value'+(f.label.includes('URL')||f.label.includes('Service')?' mono':''):'detail-value empty';
+      return `<div class="detail-field">
+        <div class="detail-label">${f.ic}<span>${esc(f.label)}</span></div>
+        <div class="${cls}">${v?esc(v):'—'}</div>
+      </div>`;
+    }).join('');
+
+    const pre=document.getElementById('payload');
+    pre.textContent=JSON.stringify(e,null,2);
+    pre.dataset.url=src.requestUrl||'';
+    document.getElementById('detailPanel').scrollIntoView({behavior:'smooth',block:'start'});
+  }
+
+  async function refreshAll(){ await Promise.all([refreshPods(), refreshEvents()]); }
+  refreshAll();
+</script>
+</body>
+</html>

@@ -37,9 +37,11 @@ def setup_logging(level: str = "INFO") -> None:
     # Replace default handlers
     root.handlers = [handler]
 
-    # Quiet noisy libs a bit
+    # Quiet noisy libs (otherwise K8s client / HTTP stack can spam DEBUG/INFO before app code runs)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("opensearch").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("kubernetes").setLevel(logging.WARNING)
 
 
 def get_logger(name: str) -> logging.Logger:

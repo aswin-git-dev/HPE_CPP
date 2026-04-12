@@ -22,13 +22,24 @@ class RetentionService:
             return True
         return namespace in self._allowed
 
+    @staticmethod
+    def _always_keep_authz_denial(normalized: Dict[str, Any]) -> bool:
+        """401/403 and unauthorized_access must not be dropped by namespace filters (e.g. probes against kube-system)."""
+        if normalized.get("source_type") != "k8s_audit":
+            return False
+        if normalized.get("status_code") in (401, 403):
+            return True
+        if normalized.get("classification") == "unauthorized_access":
+            return True
+        return False
+
     def apply(self, normalized: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
         """
         Returns (event, dropped). Drop only based on namespace policy.
         Apply field retention and raw_event trimming.
         """
         namespace = normalized.get("namespace")
-        if not self.is_namespace_allowed(namespace):
+        if not self._always_keep_authz_denial(normalized) and not self.is_namespace_allowed(namespace):
             return normalized, True
 
         event = dict(normalized)

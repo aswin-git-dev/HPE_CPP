@@ -17,8 +17,12 @@ class K8sMonitorService:
             config.load_incluster_config()
             self._core = client.CoreV1Api()
         except ConfigException:
-            # Local/dev mode without in-cluster credentials.
-            self._core = None
+            try:
+                # Local/dev mode: try kubeconfig (e.g. ~/.kube/config)
+                config.load_kube_config()
+                self._core = client.CoreV1Api()
+            except ConfigException:
+                self._core = None
 
     def pods_by_namespace(self) -> Dict[str, List[Dict[str, Any]]]:
         if self._core is None:

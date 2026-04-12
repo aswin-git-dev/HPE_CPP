@@ -1,6 +1,152 @@
 apiVersion: audit.k8s.io/v1
 kind: Policy
+omitStages: []
 rules:
+  # ── Tier 1: Highest-value security events — full request+response body ──────
+  # RBAC changes: roles, bindings (cluster-wide and namespaced)
   - level: RequestResponse
-    verbs: ["create", "update", "delete", "patch", "exec"]
+    stages: [RequestReceived, ResponseStarted, ResponseComplete]
+    verbs: [create, update, patch, delete]
+    resources:
+      - group: "rbac.authorization.k8s.io"
+        resources:
+          - roles
+          - rolebindings
+          - clusterroles
+          - clusterrolebindings
+
+  # Secrets: any write or read
+  - level: RequestResponse
+    stages: [RequestReceived, ResponseStarted, ResponseComplete]
+    verbs: [create, update, patch, delete, get, list, watch]
+    resources:
+      - group: ""
+        resources: [secrets]
+
+  # ServiceAccounts: creation / mutation (identity provisioning)
+  - level: RequestResponse
+    stages: [RequestReceived, ResponseStarted, ResponseComplete]
+    verbs: [create, update, patch, delete]
+    resources:
+      - group: ""
+        resources: [serviceaccounts]
+
+  # Token requests (service-account token generation — credential issuance)
+  - level: RequestResponse
+    stages: [RequestReceived, ResponseStarted, ResponseComplete]
+    verbs: [create]
+    resources:
+      - group: ""
+        resources: [serviceaccounts/token]
+
+  # ── Tier 2: High-value — log metadata + request body (no response body) ─────
+  # Pod exec / attach / port-forward (runtime interactive access)
+  - level: Request
+    stages: [RequestReceived, ResponseStarted, ResponseComplete]
+    verbs: [create]
+    resources:
+      - group: ""
+        resources:
+          - pods/exec
+          - pods/attach
+          - pods/portforward
+
+  # ConfigMaps: config / environment injection changes
+  - level: Request
+    stages: [RequestReceived, ResponseStarted, ResponseComplete]
+    verbs: [create, update, patch, delete]
+    resources:
+      - group: ""
+        resources: [configmaps]
+
+  # Namespaces: creation / deletion (blast-radius changes)
+  - level: Request
+    stages: [RequestReceived, ResponseStarted, ResponseComplete]
+    verbs: [create, delete]
+    resources:
+      - group: ""
+        resources: [namespaces]
+
+  # Deployments, StatefulSets, DaemonSets: workload mutations
+  - level: Request
+    stages: [RequestReceived, ResponseStarted, ResponseComplete]
+    verbs: [create, update, patch, delete]
+    resources:
+      - group: "apps"
+        resources:
+          - deployments
+          - statefulsets
+          - daemonsets
+          - replicasets
+
+  # NetworkPolicies: network segmentation changes
+  - level: Request
+    stages: [RequestReceived, ResponseStarted, ResponseComplete]
+    verbs: [create, update, patch, delete]
+    resources:
+      - group: "networking.k8s.io"
+        resources: [networkpolicies]
+
+  # PodSecurityPolicies / admission webhooks (privilege boundary)
+  - level: Request
+    stages: [RequestReceived, ResponseStarted, ResponseComplete]
+    verbs: [create, update, patch, delete]
+    resources:
+      - group: "admissionregistration.k8s.io"
+        resources:
+          - mutatingwebhookconfigurations
+          - validatingwebhookconfigurations
+
+  # ── Tier 3: Metadata only — track lifecycle without heavy storage ─────────
+  # Pod create/delete (workload scheduling visibility)
+  - level: Metadata
+    stages: [RequestReceived, ResponseComplete]
+    verbs: [create, delete]
+    resources:
+      - group: ""
+        resources: [pods]
+
+  # Persistent volumes / claims: storage provisioning events
+  - level: Metadata
+    stages: [RequestReceived, ResponseComplete]
+    verbs: [create, update, patch, delete]
+    resources:
+      - group: ""
+        resources:
+          - persistentvolumes
+          - persistentvolumeclaims
+
+  # ── Drop pure read-only noise ────────────────────────────────────────────────
+  # Suppress get/list/watch on common non-sensitive resources
+  - level: None
+    verbs: [get, list, watch]
+    resources:
+      - group: ""
+        resources:
+          - events
+          - endpoints
+          - nodes/status
+          - pods/status
+          - pods/log
+      - group: "apps"
+        resources:
+          - replicasets
+      - group: "autoscaling"
+        resources:
+          - horizontalpodautoscalers
+
+  # Drop healthcheck / metrics endpoints from kube-system
+  - level: None
+    userGroups: ["system:nodes"]
+    verbs: [get, list, watch]
+    resources:
+      - group: ""
+        resources: [nodes, nodes/status, configmaps]
+
+  # ── Catch-all for anything not matched above ──────────────────────────────
+  # Mutations on anything else get Metadata-only logging
+  - level: Metadata
+    verbs: [create, update, patch, delete]
+
+  # Everything else (reads not matched) → silent
   - level: None

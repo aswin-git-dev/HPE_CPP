@@ -33,13 +33,28 @@ data:
       .verb = to_string(parsed.verb) ?? "unknown"
       .stage = to_string(parsed.stage) ?? null
       .requestURI = to_string(parsed.requestURI) ?? "/unknown"
+      .userAgent = to_string(parsed.userAgent) ?? null
 
       user = parsed.user
       if is_object(user) {
         .user = {}
         .user.username = to_string(user.username) ?? null
+        .user.uid = to_string(user.uid) ?? null
         if is_array(user.groups) {
           .user.groups = user.groups
+        }
+        if is_object(user.extra) {
+          .user.extra = user.extra
+        }
+      }
+
+      imp = parsed.impersonatedUser
+      if is_object(imp) {
+        .impersonatedUser = {}
+        .impersonatedUser.username = to_string(imp.username) ?? null
+        .impersonatedUser.uid = to_string(imp.uid) ?? null
+        if is_array(imp.groups) {
+          .impersonatedUser.groups = imp.groups
         }
       }
 
@@ -49,6 +64,9 @@ data:
         .objectRef.namespace = to_string(obj.namespace) ?? null
         .objectRef.resource = to_string(obj.resource) ?? null
         .objectRef.name = to_string(obj.name) ?? null
+        .objectRef.subresource = to_string(obj.subresource) ?? null
+        .objectRef.apiVersion = to_string(obj.apiVersion) ?? null
+        .objectRef.apiGroup = to_string(obj.apiGroup) ?? null
       }
 
       resp = parsed.responseStatus
@@ -56,6 +74,9 @@ data:
         .responseStatus = {}
         c, cerr = to_int(resp.code)
         .responseStatus.code = if cerr == null { c } else { null }
+        .responseStatus.status = to_string(resp.status) ?? null
+        .responseStatus.reason = to_string(resp.reason) ?? null
+        .responseStatus.message = to_string(resp.message) ?? null
       }
 
       if is_array(parsed.sourceIPs) {
@@ -75,8 +96,7 @@ data:
       }
     '''
 
-    # Kubernetes core/v1 "events" objects are patched constantly by kubelets/controllers
-    # when pods fail (ImagePullBackOff, etc.) — noisy and not the same as "audit events ingested".
+    # Drop constant kubelet patch/update noise on core events objects.
     [transforms.drop_k8s_event_object_churn]
     type = "filter"
     inputs = ["to_bulk"]
@@ -89,9 +109,29 @@ data:
       !(r == "events" && (v == "patch" || v == "update"))
     '''
 
-    [transforms.only_valid_k8s_audit]
+    # Drop pure read-only non-security noise (healthz, metrics, leases, tokenreviews).
+    [transforms.drop_noise]
     type = "filter"
     inputs = ["drop_k8s_event_object_churn"]
+    condition = '''
+      uri = downcase(to_string(.event.requestURI) ?? "")
+      verb = downcase(to_string(.event.verb) ?? "")
+      resource = ""
+      if is_object(.event.objectRef) {
+        resource = downcase(to_string(.event.objectRef.resource) ?? "")
+      }
+      # Drop healthz/readyz/metrics/livez probes
+      health_probe = starts_with(uri, "/healthz") || starts_with(uri, "/readyz") || starts_with(uri, "/livez") || starts_with(uri, "/metrics")
+      # Drop pure coordination leases (HB noise)
+      lease_noise = (resource == "leases" && (verb == "get" || verb == "update" || verb == "patch"))
+      # Drop TokenReviews / SubjectAccessReviews (voluminous, not audit-relevant at read level)
+      auth_review_noise = (resource == "tokenreviews" || resource == "subjectaccessreviews" || resource == "selfsubjectrulesreviews") && verb == "create"
+      !(health_probe || lease_noise || auth_review_noise)
+    '''
+
+    [transforms.only_valid_k8s_audit]
+    type = "filter"
+    inputs = ["drop_noise"]
     condition = '.event != null && .event.requestURI != null && .event.verb != "unknown"'
 
     [sinks.audit_service]
@@ -100,8 +140,8 @@ data:
     uri = "http://audit-service.ecommerce.svc.cluster.local:8005/ingest/bulk"
     method = "post"
     encoding.codec = "json"
-    batch.max_events = 1
-    batch.timeout_secs = 1
+    batch.max_events = 10
+    batch.timeout_secs = 2
     request.timeout_secs = 10
     healthcheck.enabled = false
 

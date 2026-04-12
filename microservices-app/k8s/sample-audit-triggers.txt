@@ -19,86 +19,249 @@ If a URL shows "Not Found" or JSON error, rebuild audit-service and redeploy:
   minikube image build -t audit-service:latest ..\audit-service
   (then distribute image to m02/m03 per run-project.bat, or run full bat)
 
+=================================================================
+CLASSIFICATION: rbac_change
+Triggers "rbac_change" in data.network.classification
+=================================================================
+
 -----------------------------------------------------------------
-1. NAMESPACE create + delete
+1. RBAC — Create ClusterRole + ClusterRoleBinding (privilege grant)
+   Stages captured: RequestReceived, ResponseStarted, ResponseComplete
+   Tier: RequestResponse (full body logged)
+-----------------------------------------------------------------
+kubectl create clusterrole demo-cr --verb=get,list,watch --resource=secrets
+kubectl create clusterrolebinding demo-crb --clusterrole=demo-cr --user=demo-user@hpe.com
+kubectl delete clusterrolebinding demo-crb
+kubectl delete clusterrole demo-cr
+
+-----------------------------------------------------------------
+2. RBAC — Namespace-scoped Role + RoleBinding
+-----------------------------------------------------------------
+kubectl -n ecommerce create role demo-role --verb=create,delete --resource=pods
+kubectl -n ecommerce create rolebinding demo-rb --role=demo-role --user=dev-user@hpe.com
+kubectl -n ecommerce delete rolebinding demo-rb
+kubectl -n ecommerce delete role demo-role
+
+=================================================================
+CLASSIFICATION: secret_access
+Triggers "secret_access" in data.network.classification
+=================================================================
+
+-----------------------------------------------------------------
+3. SECRET — Create, read, delete
+   Tier: RequestResponse (full body including value is logged)
+-----------------------------------------------------------------
+kubectl -n ecommerce create secret generic audit-demo-secret --from-literal=api_key=s3cr3t-v@lue
+kubectl -n ecommerce get secret audit-demo-secret -o json
+kubectl -n ecommerce delete secret audit-demo-secret
+
+-----------------------------------------------------------------
+4. SECRET — Patch (simulates credential rotation)
+-----------------------------------------------------------------
+kubectl -n ecommerce create secret generic rotate-demo --from-literal=token=old-token
+CMD:
+kubectl -n ecommerce patch secret rotate-demo -p "{\"data\":{\"token\":\"bmV3LXRva2Vu\"}}"
+PowerShell:
+kubectl -n ecommerce patch secret rotate-demo -p '{"data":{"token":"bmV3LXRva2Vu"}}'
+kubectl -n ecommerce delete secret rotate-demo
+
+=================================================================
+CLASSIFICATION: exec_access
+Triggers "exec_access" — subresource=exec/attach/portforward
+=================================================================
+
+-----------------------------------------------------------------
+5. POD EXEC — Interactive shell into running pod
+   Stage: RequestReceived + ResponseStarted
+   Subresource: exec  →  objectRef.subresource = "exec"
+-----------------------------------------------------------------
+CMD:
+kubectl -n ecommerce exec deployment/audit-service -- python -c "print('exec-audit-test')"
+
+PowerShell:
+kubectl -n ecommerce exec deployment/audit-service -- python -c 'print("exec-audit-test")'
+
+-----------------------------------------------------------------
+6. POD EXEC — Simulate suspicious shell access
+-----------------------------------------------------------------
+CMD:
+kubectl -n ecommerce exec deployment/audit-service -- sh -c "whoami && id && hostname"
+
+PowerShell:
+kubectl -n ecommerce exec deployment/audit-service -- sh -c 'whoami && id && hostname'
+
+=================================================================
+CLASSIFICATION: privilege_escalation_candidate
+Triggers when ServiceAccount tokens are created / SAs provisioned
+=================================================================
+
+-----------------------------------------------------------------
+7. SERVICE ACCOUNT — Create SA + generate token
+-----------------------------------------------------------------
+kubectl -n ecommerce create serviceaccount priv-demo-sa
+kubectl -n ecommerce create token priv-demo-sa
+kubectl -n ecommerce delete serviceaccount priv-demo-sa
+
+=================================================================
+CLASSIFICATION: config_change
+ConfigMap mutations are security-relevant configuration changes
+=================================================================
+
+-----------------------------------------------------------------
+8. CONFIGMAP — Create, patch, delete
+-----------------------------------------------------------------
+kubectl -n ecommerce create configmap audit-demo-cm --from-literal=env=dev --from-literal=log_level=DEBUG
+CMD:
+kubectl -n ecommerce patch configmap audit-demo-cm -p "{\"data\":{\"env\":\"prod\",\"log_level\":\"INFO\"}}"
+PowerShell:
+kubectl -n ecommerce patch configmap audit-demo-cm -p '{"data":{"env":"prod","log_level":"INFO"}}'
+kubectl -n ecommerce delete configmap audit-demo-cm
+
+=================================================================
+CLASSIFICATION: destructive_change
+Delete on workloads / namespaces flagged for blast-radius review
+=================================================================
+
+-----------------------------------------------------------------
+9. NAMESPACE — Create + delete (blast-radius event)
 -----------------------------------------------------------------
 kubectl create namespace demo-audit-ns
 kubectl delete namespace demo-audit-ns
 
 -----------------------------------------------------------------
-2. SECRET create + delete
+10. DEPLOYMENT — Scale down + delete (destructive change)
 -----------------------------------------------------------------
-kubectl -n ecommerce create secret generic demo-secret --from-literal=password=test123
-kubectl -n ecommerce delete secret demo-secret
-
------------------------------------------------------------------
-3. CONFIGMAP create + patch + delete
------------------------------------------------------------------
-kubectl -n ecommerce create configmap demo-cm --from-literal=env=dev
-
-CMD (one line):
-kubectl -n ecommerce patch configmap demo-cm -p "{\"data\":{\"env\":\"prod\"}}"
-
-PowerShell (use single quotes around JSON):
-kubectl -n ecommerce patch configmap demo-cm -p '{"data":{"env":"prod"}}'
-
-kubectl -n ecommerce delete configmap demo-cm
-
------------------------------------------------------------------
-4. POD lifecycle
------------------------------------------------------------------
-kubectl -n ecommerce run demo-pod --image=busybox:1.36 --restart=Never -- sleep 30
-kubectl -n ecommerce delete pod demo-pod --grace-period=0
-
------------------------------------------------------------------
-5. DEPLOYMENT scale
------------------------------------------------------------------
-kubectl -n ecommerce scale deployment audit-service --replicas=2
+kubectl -n ecommerce scale deployment audit-service --replicas=0
 kubectl -n ecommerce scale deployment audit-service --replicas=1
 
------------------------------------------------------------------
-6. RBAC demo
------------------------------------------------------------------
-kubectl create namespace rbac-demo
-kubectl -n rbac-demo create serviceaccount demo-sa
-kubectl create clusterrolebinding demo-crb --clusterrole=view --serviceaccount=rbac-demo:demo-sa
-kubectl delete clusterrolebinding demo-crb
-kubectl delete namespace rbac-demo
+=================================================================
+CLASSIFICATION: unauthorized_access  (simulated 403)
+=================================================================
 
 -----------------------------------------------------------------
-7. EXEC (audit pods/exec)
------------------------------------------------------------------
-CMD:
-kubectl -n ecommerce exec deployment/audit-service -- python -c "print('audit exec test')"
-
-PowerShell (avoid nested double-quotes):
-kubectl -n ecommerce exec deployment/audit-service -- python -c 'print("audit exec test")'
-
------------------------------------------------------------------
-8. AUTH can-i
+11. AUTH CAN-I — Check permissions (generates SubjectAccessReview)
 -----------------------------------------------------------------
 kubectl auth can-i create secrets -n ecommerce
 kubectl auth can-i delete pods -n kube-system
 kubectl auth can-i --list -n ecommerce
 
 -----------------------------------------------------------------
-9. Bulk namespaces (CMD only — type exactly in cmd.exe)
+12. FORCE a 403 — try to access kube-system as default SA
+-----------------------------------------------------------------
+kubectl -n kube-system get secrets --as=system:serviceaccount:ecommerce:default
+
+=================================================================
+BULK / CHAINED SCENARIOS
+=================================================================
+
+-----------------------------------------------------------------
+13. Full RBAC privilege-escalation chain
+    Create role → bind → access secrets → clean up
+-----------------------------------------------------------------
+  kubectl create namespace sec-demo
+  kubectl -n sec-demo create serviceaccount escalation-sa
+  kubectl -n sec-demo create role sec-reader --verb=get,list --resource=secrets
+  kubectl -n sec-demo create rolebinding sec-rb --role=sec-reader --serviceaccount=sec-demo:escalation-sa
+  kubectl -n sec-demo get secrets --as=system:serviceaccount:sec-demo:escalation-sa
+  kubectl -n sec-demo delete rolebinding sec-rb
+  kubectl -n sec-demo delete role sec-reader
+  kubectl delete namespace sec-demo
+
+-----------------------------------------------------------------
+14. Batch namespace operations (CMD only — run in cmd.exe)
 -----------------------------------------------------------------
 for %i in (ns-alpha ns-beta ns-gamma) do @kubectl create namespace %i
 for %i in (ns-alpha ns-beta ns-gamma) do @kubectl delete namespace %i
 
-PowerShell equivalent (run line by line):
+PowerShell:
   foreach ($n in 'ns-alpha','ns-beta','ns-gamma') { kubectl create namespace $n }
   foreach ($n in 'ns-alpha','ns-beta','ns-gamma') { kubectl delete namespace $n }
 
 -----------------------------------------------------------------
-10. Batch namespace demo
+15. Batch secret + configmap + pod (stress-test the pipeline)
 -----------------------------------------------------------------
 kubectl create namespace batch-demo
 kubectl -n batch-demo create configmap cfg1 --from-literal=x=1
 kubectl -n batch-demo create secret generic sec1 --from-literal=k=v
 kubectl -n batch-demo run p1 --image=busybox:1.36 --restart=Never -- sleep 5
+kubectl -n batch-demo exec p1 -- whoami
 kubectl -n batch-demo delete pod p1 --grace-period=0
 kubectl delete namespace batch-demo
 
------------------------------------------------------------------
+=================================================================
+VERIFY EVENTS APPEARED IN THE PIPELINE
+=================================================================
+
+# Raw normalized events (latest 50)
+curl http://127.0.0.1:18015/control-plane/events?limit=50
+
+# HPE CloudEvents-shaped payload
+curl http://127.0.0.1:18015/control-plane/events/hpe?limit=50
+
+# Filter by classification in HPE UI
+http://127.0.0.1:18015/control-plane/ui
+  → use "Classification" dropdown: rbac_change / secret_access / exec_access / config_change
+
+=================================================================
+EXPECTED PAYLOAD SHAPE (one event example)
+=================================================================
+
+{
+  "specversion": "1.0",
+  "id": "<auditID from apiserver>",
+  "source": "urn:k8s:cluster:prod-cluster-01",
+  "type": "com.hpe.k8s.audit.secrets.create",
+  "time": "2026-04-03T10:00:00Z",
+  "invocationtime": "2026-04-03T10:00:00.000Z",
+  "completetime":   "2026-04-03T10:00:00.012Z",
+  "dataContentType": "application/json",
+  "dataSchema": "urn:hpe:security:audit:schema:v1",
+  "securityRelevant": "yes",
+  "data": {
+    "source": {
+      "subject":           "kubernetes-admin",
+      "user":              "kubernetes-admin",
+      "requestRoles":      "system:masters,system:authenticated",
+      "requestPrivileges": "create,secrets",
+      "requestingService": "kubectl/v1.29.0",
+      "requestMethod":     "POST",
+      "requestUrl":        "/api/v1/namespaces/ecommerce/secrets",
+      "requestSource":     "192.168.49.1",
+      "requestPort":       null
+    },
+    "destination": {
+      "requestedCall":       "POST /api/v1/namespaces/ecommerce/secrets",
+      "destination":         "kube-apiserver",
+      "destinationPort":     6443,
+      "l4protocol":          "TCP",
+      "protocolBinding":     "TLS",
+      "encryption":          "TLS 1.3",
+      "destinationService":  "kube-apiserver",
+      "destinationUserRoles": null,
+      "destinationUserPrivs": null,
+      "apiGroup":            null
+    },
+    "network": {
+      "eventLocation": "k8s-control-plane",
+      "stage":         "ResponseComplete",
+      "apiCallResult": "Success",
+      "eventCount":    "1",
+      "statusCode":    201,
+      "classification": "secret_access",
+      "severity":       "info"
+    },
+    "object": {
+      "objname":        "audit-demo-secret",
+      "objtype":        "secrets",
+      "objowner":       "ecommerce",
+      "objperms":       "create,secrets",
+      "objaccessresult":"Success",
+      "assertedroles":  "system:masters,system:authenticated",
+      "assertedprivs":  "create,secrets",
+      "objchanges":     "[ResponseComplete] create secrets audit-demo-secret uri=/api/v1/namespaces/ecommerce/secrets",
+      "objcreatetime":  "2026-04-03T10:00:00.000Z",
+      "objmodtime":     "2026-04-03T10:00:00.012Z",
+      "objdeletetime":  null
+    }
+  }
+}
