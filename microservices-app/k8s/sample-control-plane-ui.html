@@ -106,6 +106,7 @@
     .cls-destruct{background:#fff0e8;color:#7a2a00;border-color:#f0a070;}
     .cls-unauth{background:var(--err-bg);color:var(--err-txt);border-color:var(--err-bdr);}
     .cls-webhook{background:#f8f0ff;color:#5a1a8a;border-color:#d0a0f8;}
+    .cls-normal{background:#f0f0f0;color:#555;border-color:#ccc;}
 
     .detail-panel{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:0 2px 14px var(--shadow);overflow:hidden;margin-bottom:16px;}
     .detail-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0;border-top:1px solid var(--border);}
@@ -231,10 +232,12 @@
           <option value="rbac_change">rbac_change</option>
           <option value="secret_access">secret_access</option>
           <option value="exec_access">exec_access</option>
-          <option value="privilege_escalation_candidate">privilege_escalation</option>
+          <option value="privilege_escalation_candidate">privilege_escalation_candidate</option>
           <option value="config_change">config_change</option>
           <option value="destructive_change">destructive_change</option>
           <option value="unauthorized_access">unauthorized_access</option>
+          <option value="admission_webhook_change">admission_webhook_change</option>
+          <option value="normal_operation">normal_operation</option>
         </select>
       </div>
       <div class="fgroup" style="flex:2;min-width:220px;">
@@ -242,6 +245,14 @@
         <input id="qFilter" type="text" placeholder="user / method / resource / uri…"/>
       </div>
       <button class="apply-btn" type="button" onclick="renderEvents()">Apply</button>
+      <button class="apply-btn" type="button" onclick="exportCsv()" style="background:#2d6a4f;" title="Download filtered events as CSV">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        CSV
+      </button>
+      <button class="apply-btn" type="button" onclick="exportExcel()" style="background:#1d6a3c;" title="Download filtered events as Excel (.xlsx)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Excel
+      </button>
     </div>
     <p class="audit-hint" style="margin:0;padding:8px 16px 10px;font-size:.78rem;color:var(--muted);border-bottom:1px solid var(--border);background:#fafcf9;line-height:1.45;">
       Shows recent API traffic from the whole cluster (nodes, controllers, and users). Search for <code style="font-size:.85em;">sec-demo</code> or <code style="font-size:.85em;">escalation-sa</code>, or filter by namespace. Click a row to open details — <strong>Copy JSON</strong> copies the full payload.
@@ -367,7 +378,7 @@
     const m={rbac_change:'cls-rbac',secret_access:'cls-secret',exec_access:'cls-exec',
       privilege_escalation_candidate:'cls-priv',config_change:'cls-config',
       destructive_change:'cls-destruct',unauthorized_access:'cls-unauth',
-      admission_webhook_change:'cls-webhook'};
+      admission_webhook_change:'cls-webhook',normal_operation:'cls-normal'};
     return 'pill tag '+(m[cls]||'');
   }
   function formatClassificationLabel(cls){
@@ -445,10 +456,29 @@
 
   async function refreshEvents(){
     const limit=Number(document.getElementById('limit').value||50);
-    const fetchLimit=Math.min(400,Math.max(limit,200));
+    const fetchLimit=Math.max(limit,400);  // always fetch at least 400 for export
     let j;
-    if (DEMO) j = MOCK_EVENTS;
-    else { const r=await fetch(`/control-plane/events/hpe?limit=${fetchLimit}`); j = await r.json(); }
+    if (DEMO) { j = MOCK_EVENTS; }
+    else {
+      j = null;
+      try {
+        const r=await fetch(`/control-plane/events/hpe?limit=${fetchLimit}`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        j = await r.json();
+      } catch(err) {
+        await new Promise(res=>setTimeout(res,1500));
+        try {
+          const r2=await fetch(`/control-plane/events/hpe?limit=${fetchLimit}`);
+          if (r2.ok) j = await r2.json();
+        } catch(_) {}
+      }
+      if (!j) { toast('Refresh failed — keeping existing events'); return; }
+      const incoming = j.events||[];
+      if (incoming.length === 0 && currentEvents.length > 0) {
+        toast('Server returned 0 events — retaining last known data');
+        return;
+      }
+    }
     currentEvents=j.events||[];
     const resourceSel=document.getElementById('resourceFilter');
     if(resourceSel){
@@ -543,6 +573,90 @@
 
   async function refreshAll(){ await Promise.all([refreshPods(), refreshEvents()]); }
   refreshAll();
+
+  /* ── Export helpers ───────────────────────────────────────────────────────── */
+  const EXPORT_COLS = [
+    { h: 'Time (IST)',        fn: e => formatIst(e.time) },
+    { h: 'Timestamp (UTC)',   fn: e => e.time || '' },
+    { h: 'Event Type',        fn: e => e.type || '' },
+    { h: 'Classification',    fn: e => e.data?.network?.classification || '' },
+    { h: 'Result',            fn: e => e.data?.network?.apiCallResult || '' },
+    { h: 'Status Code',       fn: e => e.data?.network?.statusCode ?? '' },
+    { h: 'Stage',             fn: e => e.data?.network?.stage || '' },
+    { h: 'Severity',          fn: e => e.data?.network?.severity || '' },
+    { h: 'Security Relevant', fn: e => e.securityRelevant || '' },
+    { h: 'User / Subject',    fn: e => e.data?.source?.subject || e.data?.source?.user || '' },
+    { h: 'Roles',             fn: e => e.data?.source?.requestRoles || '' },
+    { h: 'Privileges',        fn: e => e.data?.source?.requestPrivileges || '' },
+    { h: 'Method',            fn: e => e.data?.source?.requestMethod || '' },
+    { h: 'Request URL',       fn: e => e.data?.source?.requestUrl || '' },
+    { h: 'Source IP',         fn: e => e.data?.source?.requestSource || '' },
+    { h: 'Requesting Service',fn: e => e.data?.source?.requestingService || '' },
+    { h: 'Namespace',         fn: e => e.data?.object?.objowner || '' },
+    { h: 'Object Type',       fn: e => e.data?.object?.objtype || '' },
+    { h: 'Object Name',       fn: e => e.data?.object?.objname || '' },
+    { h: 'Access Result',     fn: e => e.data?.object?.objaccessresult || '' },
+    { h: 'Changes',           fn: e => e.data?.object?.objchanges || '' },
+    { h: 'Destination',       fn: e => e.data?.destination?.destination || '' },
+    { h: 'Dest Port',         fn: e => e.data?.destination?.destinationPort ?? '' },
+    { h: 'Encryption',        fn: e => e.data?.destination?.encryption || '' },
+    { h: 'Event ID',          fn: e => e.id || '' },
+    { h: 'Source URN',        fn: e => e.source || '' },
+    { h: 'Invocation Time',   fn: e => e.invocationtime || '' },
+    { h: 'Completion Time',   fn: e => e.completetime || '' },
+  ];
+
+  function _buildRows() {
+    // Always export ALL events matching current filters — not just the 50 shown on screen
+    const events = applyFilters(currentEvents);
+    if (!events.length) { toast('No events to export (check filters)'); return null; }
+    const headers = EXPORT_COLS.map(c => c.h);
+    const rows = events.map(e => EXPORT_COLS.map(c => { const v = c.fn(e); return v == null ? '' : String(v); }));
+    return { headers, rows, count: events.length };
+  }
+
+  function exportCsv() {
+    const d = _buildRows(); if (!d) return;
+    const esc2 = v => { v = String(v ?? ''); return v.includes(',') || v.includes('"') || v.includes('\n') ? '"' + v.replace(/"/g,'""') + '"' : v; };
+    const ts = new Date().toISOString().slice(0,19).replace(/[T:]/g,'-');
+    const csv = [d.headers, ...d.rows].map(r => r.map(esc2).join(',')).join('\r\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `audit-events-${ts}.csv`;
+    a.click();
+    toast(`Exported ${d.count} events as CSV`);
+  }
+
+  function exportExcel() {
+    const d = _buildRows(); if (!d) return;
+    // Use SheetJS (xlsx) loaded from CDN — works in any browser with internet access.
+    if (typeof XLSX === 'undefined') {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+      script.onload = () => _doExcelDownload(d);
+      script.onerror = () => { toast('Excel lib failed to load — try CSV instead'); };
+      document.head.appendChild(script);
+    } else {
+      _doExcelDownload(d);
+    }
+  }
+
+  function _doExcelDownload(d) {
+    const ws = XLSX.utils.aoa_to_sheet([d.headers, ...d.rows]);
+    // Column widths
+    ws['!cols'] = EXPORT_COLS.map((c, i) => {
+      const maxLen = Math.max(c.h.length, ...d.rows.map(r => (r[i]||'').length));
+      return { wch: Math.min(60, maxLen + 2) };
+    });
+    // Freeze header row
+    ws['!freeze'] = { xSplit: 0, ySplit: 1 };
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Audit Events');
+    const ts = new Date().toISOString().slice(0,19).replace(/[T:]/g,'-');
+    XLSX.writeFile(wb, `audit-events-${ts}.xlsx`);
+    toast(`Exported ${d.count} events as Excel`);
+  }
 </script>
 </body>
 </html>

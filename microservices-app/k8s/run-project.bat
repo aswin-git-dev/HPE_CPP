@@ -36,11 +36,7 @@ minikube start ^
   --nodes=3 ^
   --cpus=2 ^
   --memory=2048 ^
-  --extra-config=apiserver.audit-policy-file=/var/lib/minikube/certs/audit-policy.yaml ^
-  --extra-config=apiserver.audit-log-path=/var/log/kubernetes/audit/audit.log ^
-  --extra-config=apiserver.audit-log-maxage=7 ^
-  --extra-config=apiserver.audit-log-maxbackup=3 ^
-  --extra-config=apiserver.audit-log-maxsize=100
+  --extra-config=apiserver.audit-policy-file=/var/lib/minikube/certs/audit-policy.yaml
 if errorlevel 1 (
   echo.
   echo ERROR: minikube start failed. Check Docker Desktop is running.
@@ -96,8 +92,23 @@ timeout /t 10 /nobreak >nul
 goto patch_retry
 
 :patched
-echo      Waiting 15s for kube-apiserver to reload...
-timeout /t 15 /nobreak >nul
+echo      Waiting for kube-apiserver to reboot and become ready...
+timeout /t 10 /nobreak >nul
+
+set WAIT_TRY=0
+:wait_api
+set /a WAIT_TRY+=1
+kubectl get --raw /healthz >nul 2>&1
+if not errorlevel 1 goto api_ready
+if !WAIT_TRY! geq 20 (
+  echo      WARN: API server took too long. Proceeding to apply...
+  goto api_ready
+)
+timeout /t 3 /nobreak >nul
+goto wait_api
+
+:api_ready
+echo      API server is READY.
 
 REM ── 4. Apply manifests ────────────────────────────────────────
 echo [4/5] Applying manifests...

@@ -93,7 +93,11 @@ def _classify(
         return "unauthorized_access"
 
     # Pod exec / attach / portforward — interactive runtime access
+    # Match both subresource field AND URI pattern (handles SPDY/WebSocket upgrades
+    # where Minikube may not populate objectRef.subresource correctly)
     if sr in _EXEC_SUBRESOURCES or v == "exec":
+        return "exec_access"
+    if any(pat in m for pat in ("/exec", "/attach", "/portforward")):
         return "exec_access"
 
     # RBAC mutations
@@ -120,7 +124,7 @@ def _classify(
     if r in ("mutatingwebhookconfigurations", "validatingwebhookconfigurations"):
         return "admission_webhook_change"
 
-    return None
+    return "normal_operation"
 
 
 def _is_security_relevant(
