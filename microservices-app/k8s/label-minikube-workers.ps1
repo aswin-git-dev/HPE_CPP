@@ -13,11 +13,11 @@ foreach ($item in $json.items) {
 # Sort for stable ordering (minikube-m02 before minikube-m03)
 $workers = $workers | Sort-Object
 if ($workers.Count -ge 1) {
-    kubectl label node $workers[0] hpe/node-group=worker1 hpe/node-name=WorkerNode1 --overwrite 2>$null | Out-Null
+    kubectl label node $workers[0] microservices-monitor/node-group=worker1 microservices-monitor/node-name=WorkerNode1 --overwrite 2>$null | Out-Null
     Write-Host ("      Labeled {0} -> WorkerNode1 (worker1)" -f $workers[0])
 }
 if ($workers.Count -ge 2) {
-    kubectl label node $workers[1] hpe/node-group=worker2 hpe/node-name=WorkerNode2 --overwrite 2>$null | Out-Null
+    kubectl label node $workers[1] microservices-monitor/node-group=worker2 microservices-monitor/node-name=WorkerNode2 --overwrite 2>$null | Out-Null
     Write-Host ("      Labeled {0} -> WorkerNode2 (worker2)" -f $workers[1])
 }
 if ($workers.Count -eq 0) {

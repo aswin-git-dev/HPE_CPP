@@ -68,13 +68,13 @@ class K8sMonitorService:
                 for k in ("node-role.kubernetes.io/control-plane", "node-role.kubernetes.io/master")
             )
             role = "control-plane" if is_cp else "worker"
-            hpe_name = labels.get("hpe/node-name") or ""
-            hpe_group = labels.get("hpe/node-group") or ""
+            mon_name = labels.get("microservices-monitor/node-name") or ""
+            mon_group = labels.get("microservices-monitor/node-group") or ""
             node_map[name] = {
                 "name": name,
                 "role": role,
-                "hpe_node_name": hpe_name,
-                "hpe_node_group": hpe_group,
+                "monitor_node_name": mon_name,
+                "monitor_node_group": mon_group,
                 "namespaces": {},  # type: ignore
             }
 
@@ -82,8 +82,8 @@ class K8sMonitorService:
         node_map[unsched] = {
             "name": "(unscheduled)",
             "role": "pending",
-            "hpe_node_name": "",
-            "hpe_node_group": "",
+            "monitor_node_name": "",
+            "monitor_node_group": "",
             "namespaces": {},
         }
 
@@ -93,8 +93,8 @@ class K8sMonitorService:
                 node_map[node] = {
                     "name": node,
                     "role": "unknown",
-                    "hpe_node_name": "",
-                    "hpe_node_group": "",
+                    "monitor_node_name": "",
+                    "monitor_node_group": "",
                     "namespaces": {},
                 }
             ns = p.metadata.namespace or "default"

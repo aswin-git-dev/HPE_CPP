@@ -32,7 +32,7 @@ spec:
             - weight: 100
               preference:
                 matchExpressions:
-                  - key: hpe/node-group
+                  - key: microservices-monitor/node-group
                     operator: In
                     values:
                       - worker1

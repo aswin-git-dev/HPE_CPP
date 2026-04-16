@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import re
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -10,7 +11,115 @@ from app.control_plane_ui_build import build_control_plane_ui_html
 router = APIRouter(prefix="/control-plane", tags=["control-plane"])
 
 
-def _to_hpe_payload(source_urn: str, event: Dict[str, Any]) -> Dict[str, Any]:
+def _slug_falco_rule(name: str) -> str:
+    s = re.sub(r"[^a-zA-Z0-9]+", "-", name.strip()).strip("-").lower()
+    return s[:96] if s else "alert"
+
+
+MONITOR_DATA_SCHEMA = "urn:microservices-monitor:security:audit:schema:v1"
+
+
+def _to_monitor_falco_payload(source_urn: str, event: Dict[str, Any]) -> Dict[str, Any]:
+    """Falco events have no apiserver user or request stage; map workload + detection source for the UI."""
+    raw = event.get("raw_event", {}) if isinstance(event.get("raw_event"), dict) else {}
+    fields = raw.get("fields") if isinstance(raw.get("fields"), dict) else {}
+
+    ns = event.get("namespace") or fields.get("k8s.ns.name")
+    pod = event.get("pod_name") or fields.get("k8s.pod.name")
+    proc = fields.get("proc.name") or fields.get("proc.exepath")
+    container = event.get("resource_name") or fields.get("container.name")
+
+    if ns and pod:
+        subject: Optional[str] = f"{ns}/{pod}"
+    elif pod:
+        subject = pod
+    elif ns:
+        subject = ns
+    elif container:
+        subject = str(container)
+    elif proc:
+        subject = str(proc)
+    else:
+        subject = raw.get("hostname") or None
+
+    rule = event.get("event_type") or "falco_alert"
+    evt_type = f"com.microservicesmonitor.falco.{_slug_falco_rule(str(rule))}"
+    msg = event.get("message") or rule
+    falco_src = raw.get("source")
+    if isinstance(falco_src, str) and falco_src.strip():
+        stage = falco_src.strip()
+    else:
+        stage = "runtime"
+
+    status_code = event.get("status_code")
+    call_result = "Success" if (status_code or 200) < 400 else "Failure"
+    security_relevant = event.get("security_relevant") or "yes"
+
+    return {
+        "specversion": "1.0",
+        "id": event.get("event_id"),
+        "source": source_urn,
+        "type": evt_type,
+        "time": event.get("timestamp"),
+        "invocationtime": event.get("invocation_time") or event.get("timestamp"),
+        "completetime": event.get("completion_time") or event.get("timestamp"),
+        "dataContentType": "application/json",
+        "dataSchema": MONITOR_DATA_SCHEMA,
+        "securityRelevant": security_relevant,
+        "data": {
+            "source": {
+                "subject": subject,
+                "user": subject,
+                "requestRoles": None,
+                "requestPrivileges": f"falco:{rule}",
+                "requestingService": "falco",
+                "requestMethod": "DETECTION",
+                "requestUrl": msg[:512] if isinstance(msg, str) else str(msg)[:512],
+                "requestSource": fields.get("fd.name") or fields.get("fd.sip"),
+                "requestPort": None,
+            },
+            "destination": {
+                "requestedCall": f"{rule}: {msg[:280]}" if isinstance(msg, str) else str(rule),
+                "destination": "container-runtime",
+                "destinationPort": None,
+                "l4protocol": None,
+                "protocolBinding": None,
+                "encryption": None,
+                "destinationService": "falco",
+                "destinationUserRoles": None,
+                "destinationUserPrivs": None,
+                "apiGroup": None,
+            },
+            "network": {
+                "eventLocation": "container-runtime",
+                "stage": stage,
+                "apiCallResult": call_result,
+                "eventCount": "1",
+                "statusCode": status_code,
+                "classification": event.get("classification"),
+                "severity": event.get("severity"),
+            },
+            "object": {
+                "objname": pod or container or rule,
+                "objtype": "falco",
+                "objowner": ns,
+                "objperms": f"falco:{rule}",
+                "objaccessresult": call_result,
+                "assertedroles": None,
+                "assertedprivs": f"falco:{rule}",
+                "objchanges": msg,
+                "objcreatetime": event.get("invocation_time") or event.get("timestamp"),
+                "objmodtime": event.get("completion_time") or None,
+                "objdeletetime": None,
+            },
+        },
+    }
+
+
+def _to_monitor_payload(source_urn: str, event: Dict[str, Any]) -> Dict[str, Any]:
+    if event.get("source_type") == "falco":
+        return _to_monitor_falco_payload(source_urn, event)
+
     raw = event.get("raw_event", {})
     user_raw = raw.get("user", {}) if isinstance(raw.get("user"), dict) else {}
     groups_raw = user_raw.get("groups", []) if isinstance(user_raw.get("groups"), list) else []
@@ -32,9 +141,9 @@ def _to_hpe_payload(source_urn: str, event: Dict[str, Any]) -> Dict[str, Any]:
     api_group = event.get("api_group") or object_ref.get("apiGroup") or ""
     stage = event.get("stage") or ""
 
-    # CloudEvents `type` e.g. com.hpe.k8s.audit.secrets.create
+    # CloudEvents `type` e.g. com.microservicesmonitor.k8s.audit.secrets.create
     resource_label = f"{resource}.{subresource}" if subresource else resource
-    evt_type = f"com.hpe.k8s.audit.{resource_label}.{verb}"
+    evt_type = f"com.microservicesmonitor.k8s.audit.{resource_label}.{verb}"
 
     # Derived privileges from normalizer
     derived_privileges = event.get("derived_privileges")
@@ -58,7 +167,7 @@ def _to_hpe_payload(source_urn: str, event: Dict[str, Any]) -> Dict[str, Any]:
         "invocationtime": event.get("invocation_time") or event.get("timestamp"),
         "completetime": event.get("completion_time") or event.get("timestamp"),
         "dataContentType": "application/json",
-        "dataSchema": "urn:hpe:security:audit:schema:v1",
+        "dataSchema": MONITOR_DATA_SCHEMA,
         "securityRelevant": security_relevant,
         "data": {
             "source": {
@@ -123,12 +232,12 @@ def recent_events(request: Request, limit: int = 100):
     return {"events": store.latest(limit=limit)}
 
 
-@router.get("/events/hpe")
-def recent_events_hpe(request: Request, limit: int = 100):
+@router.get("/events/monitor")
+def recent_events_monitor(request: Request, limit: int = 100):
     store = request.app.state.event_store_service
     settings = request.app.state.settings
     events: List[Dict[str, Any]] = store.latest(limit=limit)
-    payloads = [_to_hpe_payload(settings.cluster_source_urn, e) for e in events]
+    payloads = [_to_monitor_payload(settings.cluster_source_urn, e) for e in events]
     return {"events": payloads}
 
 
@@ -269,7 +378,7 @@ _ARCHITECTURE_HTML = """
       for (const node of nodes) {
         const role = node.role || '';
         const headClass = role === 'control-plane' ? 'cp' : (role === 'pending' ? 'pending' : 'worker');
-        const label = node.hpe_node_name || node.hpe_node_group || '';
+        const label = node.monitor_node_name || node.monitor_node_group || '';
         const sub = [label && ('Label: ' + label), 'role: ' + role].filter(Boolean).join(' · ');
         html += '<div class="node-card"><div class="node-head ' + headClass + '"><div><div>' + escapeHtml(node.name) + '</div>';
         if (sub) html += '<div class="node-meta">' + escapeHtml(sub) + '</div>';

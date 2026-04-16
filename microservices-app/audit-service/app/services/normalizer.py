@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+import re
+from typing import Any, Dict, Optional
 
 from app.schemas import AppLogIn, FalcoAlertIn, K8sAuditLogIn, Severity, SourceType
 from app.utils.hash_utils import event_fingerprint
@@ -49,6 +50,26 @@ def _map_severity_from_falco_priority(priority: Optional[str]) -> Severity:
 
 # ── Classification helpers ────────────────────────────────────────────────────
 
+def _is_kubelet_noise(user: Optional[str], verb: Optional[str], resource: Optional[str], subresource: Optional[str]) -> bool:
+    """Return True for high-volume kubelet self-management operations with no security signal.
+
+    system:node:<name> continuously:
+      - deletes pods   → scheduler/kubelet eviction and rolling-update lifecycle
+      - creates serviceaccounts/token → projected-volume SA token auto-rotation (~48 min cadence)
+    These are Kubernetes internals, not human-initiated actions.
+    """
+    if not (user or "").lower().startswith("system:node:"):
+        return False
+    v = (verb or "").lower()
+    r = (resource or "").lower()
+    sr = (subresource or "").lower()
+    if v == "delete" and r == "pods":
+        return True
+    if v == "create" and r == "serviceaccounts" and sr == "token":
+        return True
+    return False
+
+
 # Resources whose mutation always gets rbac_change classification.
 _RBAC_RESOURCES = frozenset({
     "roles", "rolebindings", "clusterroles", "clusterrolebindings",
@@ -80,11 +101,23 @@ def _classify(
     resource: Optional[str],
     subresource: Optional[str],
     message: str,
-) -> Optional[str]:
+    user: Optional[str] = None,
+) -> str:
     v = (verb or "").lower()
     r = (resource or "").lower()
     sr = (subresource or "").lower()
     m = (message or "").lower()
+
+    # Kubelet self-management: explicit bucket (still classified for analytics / UI filters).
+    if _is_kubelet_noise(user, verb, resource, subresource):
+        return "kubelet_routine"
+
+    # Kubelet PATCH pods/status | nodes/status — reports Ready/conditions; not an attack pattern but worth a stable tag.
+    u = (user or "").lower()
+    if u.startswith("system:node:") and v == "patch" and (
+        (r == "pods" and sr == "status") or (r == "nodes" and sr == "status")
+    ):
+        return "kubelet_status_reconciliation"
 
     # Unauthorized / forbidden — highest priority check
     if status_code in (401, 403):
@@ -127,19 +160,50 @@ def _classify(
     return "normal_operation"
 
 
+def _classify_app(
+    status_code: Optional[int],
+    method: Optional[str],
+    message: str,
+) -> str:
+    """Always assign an application-log classification (distinct from K8s audit labels)."""
+    m = (message or "").lower()
+    if status_code in (401, 403):
+        return "unauthorized_access"
+    if status_code is not None:
+        if 500 <= status_code < 600:
+            return "application_server_error"
+        if 400 <= status_code < 500:
+            return "application_client_error"
+        if 200 <= status_code < 400:
+            return "application_http_ok"
+    if any(sig in m for sig in ("traceback", "exception", "error", "fatal", "panic")):
+        return "application_error_signal"
+    meth = (method or "").upper()
+    if meth and meth not in ("GET", "HEAD", "OPTIONS"):
+        return "application_mutation_or_action"
+    return "application_log"
+
+
 def _is_security_relevant(
     classification: Optional[str],
     verb: Optional[str],
     resource: Optional[str],
     subresource: Optional[str],
     status_code: Optional[int],
+    user: Optional[str] = None,
 ) -> str:
     """Return 'yes' for security-relevant events, 'no' for noise."""
+    if classification in ("kubelet_routine", "kubelet_status_reconciliation"):
+        return "yes" if status_code in (401, 403) else "no"
     if classification:
         return "yes"
     v = (verb or "").lower()
     r = (resource or "").lower()
     sr = (subresource or "").lower()
+
+    # Kubelet routine ops have no security signal unless they produce an auth denial.
+    if _is_kubelet_noise(user, verb, resource, subresource) and status_code not in (401, 403):
+        return "no"
 
     if v in ("create", "update", "patch", "delete"):
         return "yes"
@@ -150,6 +214,26 @@ def _is_security_relevant(
     if r in _SECRET_RESOURCES or r in _RBAC_RESOURCES:
         return "yes"
     return "no"
+
+
+def _is_security_relevant_app(classification: str, status_code: Optional[int]) -> str:
+    if classification == "unauthorized_access" or status_code in (401, 403):
+        return "yes"
+    if classification in (
+        "application_server_error",
+        "application_client_error",
+        "application_error_signal",
+        "application_mutation_or_action",
+    ):
+        return "yes"
+    return "no"
+
+
+def _falco_rule_classification(rule: Optional[str]) -> str:
+    """Per-rule Falco classification so every runtime alert is uniquely bucketed."""
+    raw = (rule or "falco_alert").strip() or "falco_alert"
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", raw).strip("_").lower()[:96] or "alert"
+    return f"falco_{slug}"
 
 
 def _derive_privileges(verb: Optional[str], resource: Optional[str], subresource: Optional[str]) -> Optional[str]:
@@ -176,7 +260,7 @@ class Normalizer:
 
         message = payload.message
         event_type = "http_request" if payload.request_path or payload.method else "app_log"
-        classification = _classify(payload.status_code, payload.method, "http", None, message)
+        classification = _classify_app(payload.status_code, payload.method, message)
         if classification == "unauthorized_access":
             severity = Severity.unauthorized_access
 
@@ -196,7 +280,7 @@ class Normalizer:
             "resource": "http",
             "resource_name": payload.request_path,
             "status_code": payload.status_code,
-            "security_relevant": _is_security_relevant(classification, payload.method, "http", None, payload.status_code),
+            "security_relevant": _is_security_relevant_app(classification, payload.status_code),
             "tags": [],
             "raw_event": payload.model_dump(),
         }
@@ -244,11 +328,11 @@ class Normalizer:
         if uri:
             message = f"{message} uri={uri}".strip()
 
-        classification = _classify(code, verb, resource, subresource, message)
+        classification = _classify(code, verb, resource, subresource, message, user=user)
         if classification == "unauthorized_access":
             severity = Severity.unauthorized_access
 
-        security_relevant = _is_security_relevant(classification, verb, resource, subresource, code)
+        security_relevant = _is_security_relevant(classification, verb, resource, subresource, code, user=user)
 
         normalized: Dict[str, Any] = {
             "event_id": payload.auditID or "",
@@ -300,7 +384,13 @@ class Normalizer:
             pod = payload.k8s.pod_name
 
         rule = payload.rule or "falco_alert"
+        falco_classification = _falco_rule_classification(rule)
         msg = payload.output or rule
+        merged_fields: Dict[str, Any] = {}
+        if payload.output_fields and isinstance(payload.output_fields, dict):
+            merged_fields.update(payload.output_fields)
+        if payload.fields:
+            merged_fields = {**merged_fields, **payload.fields}
 
         normalized: Dict[str, Any] = {
             "event_id": "",
@@ -321,7 +411,8 @@ class Normalizer:
             "severity": severity.value,
             "event_type": rule,
             "message": msg,
-            "classification": None,
+            "classification": falco_classification,
+            "detection_layer": "falco",
             "security_relevant": "yes",
             "action": None,
             "resource": "runtime",
@@ -334,10 +425,10 @@ class Normalizer:
             "derived_privileges": None,
             "tags": [],
             "annotations": {},
-            "raw_event": payload.model_dump(by_alias=True),
+            "raw_event": payload.model_dump(by_alias=True, exclude_none=True),
         }
-        if payload.fields:
-            normalized["raw_event"]["fields"] = payload.fields
+        if merged_fields:
+            normalized["raw_event"]["fields"] = merged_fields
 
         normalized["event_id"] = event_fingerprint(normalized)
         return normalized

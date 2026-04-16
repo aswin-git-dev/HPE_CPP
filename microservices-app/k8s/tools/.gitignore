@@ -1,0 +1,4 @@
+# Portable Helm downloaded by install-falco.bat / download-portable-helm.ps1
+helm/
+*_extract/
+helm-windows-amd64.zip

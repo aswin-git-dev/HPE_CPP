@@ -1,0 +1,94 @@
+================================================================================
+VERIFY: Falco + audit-service + control-plane UI (Minikube / kubectl)
+================================================================================
+Run these from a shell where `kubectl` points at your cluster (cmd.exe or PowerShell).
+
+Prerequisites
+-------------
+- Minikube (or cluster) is UP:  minikube start
+- Context:  kubectl config current-context   (should be minikube or your cluster)
+- Namespace `ecommerce` exists and `audit-service` is deployed (e.g. run-project.bat).
+
+
+1) Cluster and core pods
+------------------------
+  kubectl cluster-info
+  kubectl get nodes
+
+  kubectl get pods -n ecommerce -l app=audit-service
+  kubectl get svc  -n ecommerce audit-service
+
+  Expect: audit-service pod Running, Service ClusterIP port 8005.
+
+
+2) Falco stack
+--------------
+  kubectl get pods -n falco
+
+  Expect: falco DaemonSet pods (one per node), falcosidekick Deployment Running.
+
+  kubectl logs -n falco -l app.kubernetes.io/name=falcosidekick --tail=50
+
+  Expect: after correct Helm values, you should NOT see only "Enabled Outputs: []" forever.
+  If you see "Enabled Outputs: []" and no webhook, re-apply values (use portable Helm if needed):
+
+    cd <your-repo>\microservices-app\k8s
+    tools\helm\helm.exe repo update
+    tools\helm\helm.exe upgrade --install falco falcosecurity/falco -n falco -f falco-values.yaml
+
+  Then check logs again; webhook output should be listed when address is set.
+
+
+3) Port-forward (needed for browser on localhost)
+---------------------------------------------------
+  From microservices-app\k8s (or use your port-forward-retry.cmd):
+
+    kubectl port-forward -n ecommerce svc/audit-service 18015:8005
+
+  Leave this window open. In browser:
+
+    http://127.0.0.1:18015/health
+    http://127.0.0.1:18015/control-plane/ui
+
+
+4) Manual Falco ingest (proves audit-service accepts JSON)
+----------------------------------------------------------
+  With port-forward running, in ANOTHER terminal (PowerShell example):
+
+    curl.exe -s -o NUL -w "HTTP %{http_code}\n" ^
+      -X POST "http://127.0.0.1:18015/ingest/falco" ^
+      -H "Content-Type: application/json" ^
+      -d "{\"rule\":\"manual-test\",\"priority\":\"Warning\",\"output\":\"verify ingest\",\"time\":\"2026-04-13T12:00:00Z\"}"
+
+  Expect: HTTP 200. Then refresh:
+
+    http://127.0.0.1:18015/control-plane/events?limit=20
+
+  You should see a falco-style event (source_type falco / runtime-falco tag).
+
+
+5) End-to-end Falco -> sidekick -> audit (optional)
+---------------------------------------------------
+  Trigger real activity (shell in a pod, etc.) and watch:
+
+    kubectl logs -n falco -l app.kubernetes.io/name=falcosidekick -f
+
+  If webhook is configured, you should see POST attempts to audit-service (or errors if NetworkPolicy / DNS blocks).
+
+
+6) Reinstall Falco from repo (clean)
+------------------------------------
+  cd <your-repo>\microservices-app\k8s
+  install-falco.bat
+
+  (Uses portable Helm under k8s\tools\helm if system helm is missing.)
+
+
+Troubleshooting (short)
+-----------------------
+- kubectl connection refused:  minikube start && minikube update-context
+- where helm empty:  use tools\helm\helm.exe or run install-falco.bat (downloads portable Helm)
+- UI empty:  confirm port-forward and EVENT_STORE / audit-service logs
+- sidekick Enabled Outputs []:  helm upgrade with falco-values.yaml (step 2)
+
+================================================================================

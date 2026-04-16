@@ -33,36 +33,39 @@ class RetentionService:
             return True
         return False
 
+    def _shape_retention_fields(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        out = dict(event)
+        if not self._store_raw:
+            out["raw_event"] = {}
+        else:
+            try:
+                raw_json = json.dumps(out.get("raw_event", {}), separators=(",", ":"), ensure_ascii=False, default=str)
+                raw_bytes = raw_json.encode("utf-8")
+                if len(raw_bytes) > self._raw_max_bytes:
+                    out["raw_event"] = {"_trimmed": True, "_bytes": len(raw_bytes)}
+            except Exception:
+                out["raw_event"] = {"_trimmed": True, "_error": "raw_event serialization failed"}
+
+        if self._retained_fields:
+            kept = {k: v for k, v in out.items() if k in self._retained_fields}
+            for required in ("event_id", "timestamp", "source_type", "severity", "event_type", "message"):
+                if required in out and required not in kept:
+                    kept[required] = out[required]
+            out = kept
+        return out
+
     def apply(self, normalized: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
         """
         Returns (event, dropped). Drop only based on namespace policy.
         Apply field retention and raw_event trimming.
         """
+        # Runtime (Falco) signals are cluster-wide; do not drop by K8s namespace policy.
+        if normalized.get("source_type") == "falco":
+            return self._shape_retention_fields(normalized), False
+
         namespace = normalized.get("namespace")
         if not self._always_keep_authz_denial(normalized) and not self.is_namespace_allowed(namespace):
             return normalized, True
 
-        event = dict(normalized)
-
-        if not self._store_raw:
-            event["raw_event"] = {}
-        else:
-            # Trim raw_event by size (bytes of compact JSON)
-            try:
-                raw_json = json.dumps(event.get("raw_event", {}), separators=(",", ":"), ensure_ascii=False, default=str)
-                raw_bytes = raw_json.encode("utf-8")
-                if len(raw_bytes) > self._raw_max_bytes:
-                    event["raw_event"] = {"_trimmed": True, "_bytes": len(raw_bytes)}
-            except Exception:
-                event["raw_event"] = {"_trimmed": True, "_error": "raw_event serialization failed"}
-
-        if self._retained_fields:
-            kept = {k: v for k, v in event.items() if k in self._retained_fields}
-            # Ensure required minimal fields
-            for required in ("event_id", "timestamp", "source_type", "severity", "event_type", "message"):
-                if required in event and required not in kept:
-                    kept[required] = event[required]
-            event = kept
-
-        return event, False
+        return self._shape_retention_fields(normalized), False
 

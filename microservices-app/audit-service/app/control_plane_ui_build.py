@@ -47,12 +47,6 @@ def _transform_sample_to_production(html: str) -> str:
         '<a href="/control-plane/architecture/ui">',
     )
 
-    start = html.find("  const DEMO")
-    end = html.find("  let currentEvents = [];")
-    if start == -1 or end == -1:
-        raise ValueError("control plane UI: bad script markers (const DEMO / let currentEvents)")
-    html = html[:start] + html[end:]
-
     old_pods = """  async function refreshPods(){
     let j;
     if (DEMO) j = MOCK_PODS;
@@ -66,22 +60,83 @@ def _transform_sample_to_production(html: str) -> str:
 
     old_ev = """  async function refreshEvents(){
     const limit=Number(document.getElementById('limit').value||50);
-    const fetchLimit=Math.min(400,Math.max(limit,200));
+    const fetchLimit=Math.max(limit,400);  // always fetch at least 400 for export
     let j;
-    if (DEMO) j = MOCK_EVENTS;
-    else { const r=await fetch(`/control-plane/events/hpe?limit=${fetchLimit}`); j = await r.json(); }"""
+    if (DEMO) { j = MOCK_EVENTS; }
+    else {
+      j = null;
+      try {
+        const r=await fetch(`/control-plane/events/monitor?limit=${fetchLimit}`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        j = await r.json();
+      } catch(err) {
+        await new Promise(res=>setTimeout(res,1500));
+        try {
+          const r2=await fetch(`/control-plane/events/monitor?limit=${fetchLimit}`);
+          if (r2.ok) j = await r2.json();
+        } catch(_) {}
+      }
+      if (!j) { toast('Refresh failed — keeping existing events'); return; }
+      const incoming = j.events||[];
+      if (incoming.length === 0 && currentEvents.length > 0) {
+        toast('Server returned 0 events — retaining last known data');
+        return;
+      }
+    }
+    currentEvents=j.events||[];
+    const resourceSel=document.getElementById('resourceFilter');
+    if(resourceSel){
+      const cur=resourceSel.value;
+      const types=Array.from(new Set(currentEvents.map(e=>e.data?.object?.objtype).filter(Boolean))).sort();
+      resourceSel.innerHTML='<option value="all">All</option>'+types.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+      if(cur&&types.includes(cur)) resourceSel.value=cur;
+    }
+    renderEvents();
+  }"""
     new_ev = """  async function refreshEvents(){
     const limit=Number(document.getElementById('limit').value||50);
-    const fetchLimit=Math.min(400,Math.max(limit,200));
-    const r=await fetch(`/control-plane/events/hpe?limit=${fetchLimit}`);
-    const j = await r.json();"""
+    const fetchLimit=Math.max(limit,400);  // always fetch at least 400 for export
+    let j = null;
+    try {
+      const r=await fetch(`/control-plane/events/monitor?limit=${fetchLimit}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      j = await r.json();
+    } catch(err) {
+      await new Promise(res=>setTimeout(res,1500));
+      try {
+        const r2=await fetch(`/control-plane/events/monitor?limit=${fetchLimit}`);
+        if (r2.ok) j = await r2.json();
+      } catch(_) {}
+    }
+    if (!j) { toast('Refresh failed — keeping existing events'); return; }
+    const incoming = j.events||[];
+    if (incoming.length === 0 && currentEvents.length > 0) {
+      toast('Server returned 0 events — retaining last known data');
+      return;
+    }
+    currentEvents=j.events||[];
+    const resourceSel=document.getElementById('resourceFilter');
+    if(resourceSel){
+      const cur=resourceSel.value;
+      const types=Array.from(new Set(currentEvents.map(e=>e.data?.object?.objtype).filter(Boolean))).sort();
+      resourceSel.innerHTML='<option value="all">All</option>'+types.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+      if(cur&&types.includes(cur)) resourceSel.value=cur;
+    }
+    renderEvents();
+  }"""
     if old_ev not in html:
         raise ValueError("control plane UI: refreshEvents block not found")
     html = html.replace(old_ev, new_ev, 1)
 
+    start = html.find("  const DEMO")
+    end = html.find("  let currentEvents = [];")
+    if start == -1 or end == -1:
+        raise ValueError("control plane UI: bad script markers (const DEMO / let currentEvents)")
+    html = html[:start] + html[end:]
+
     html = html.replace(
-        "<title>HPE Control-Plane Monitor (sample)</title>",
-        "<title>HPE Control-Plane Monitor</title>",
+        "<title>microservices-Monitor (sample)</title>",
+        "<title>microservices-Monitor</title>",
     )
     html = re.sub(
         r"  <!--\n    Sample layout:.*?\n  -->\s*",

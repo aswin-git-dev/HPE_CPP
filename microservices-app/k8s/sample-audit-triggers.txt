@@ -1,4 +1,4 @@
-== HPE Control-Plane Monitor — Sample Audit Trigger Commands ==
+== microservices-Monitor — Sample Audit Trigger Commands ==
 Run in a terminal where "kubectl" points at your Minikube cluster.
 Port-forward must be running (run-project.bat opens pf-audit on 18015).
 
@@ -11,7 +11,7 @@ URLs (paste in browser after port-forward is up)
 -----------------------------------------------------------------
   Monitor UI       http://127.0.0.1:18015/control-plane/ui
   Architecture map http://127.0.0.1:18015/control-plane/architecture/ui
-  HPE JSON         http://127.0.0.1:18015/control-plane/events/hpe?limit=50
+  Monitor JSON     http://127.0.0.1:18015/control-plane/events/monitor?limit=50
   Raw events       http://127.0.0.1:18015/control-plane/events
 
 If a URL shows "Not Found" or JSON error, rebuild audit-service and redeploy:
@@ -30,7 +30,7 @@ Triggers "rbac_change" in data.network.classification
    Tier: RequestResponse (full body logged)
 -----------------------------------------------------------------
 kubectl create clusterrole demo-cr --verb=get,list,watch --resource=secrets
-kubectl create clusterrolebinding demo-crb --clusterrole=demo-cr --user=demo-user@hpe.com
+kubectl create clusterrolebinding demo-crb --clusterrole=demo-cr --user=demo-user@example.com
 kubectl delete clusterrolebinding demo-crb
 kubectl delete clusterrole demo-cr
 
@@ -38,7 +38,7 @@ kubectl delete clusterrole demo-cr
 2. RBAC — Namespace-scoped Role + RoleBinding
 -----------------------------------------------------------------
 kubectl -n ecommerce create role demo-role --verb=create,delete --resource=pods
-kubectl -n ecommerce create rolebinding demo-rb --role=demo-role --user=dev-user@hpe.com
+kubectl -n ecommerce create rolebinding demo-rb --role=demo-role --user=dev-user@example.com
 kubectl -n ecommerce delete rolebinding demo-rb
 kubectl -n ecommerce delete role demo-role
 
@@ -195,10 +195,10 @@ VERIFY EVENTS APPEARED IN THE PIPELINE
 # Raw normalized events (latest 50)
 curl http://127.0.0.1:18015/control-plane/events?limit=50
 
-# HPE CloudEvents-shaped payload
-curl http://127.0.0.1:18015/control-plane/events/hpe?limit=50
+# CloudEvents-shaped payload (microservices-Monitor schema)
+curl http://127.0.0.1:18015/control-plane/events/monitor?limit=50
 
-# Filter by classification in HPE UI
+# Filter by classification in microservices-Monitor UI
 http://127.0.0.1:18015/control-plane/ui
   → use "Classification" dropdown: rbac_change / secret_access / exec_access / config_change
 
@@ -210,12 +210,12 @@ EXPECTED PAYLOAD SHAPE (one event example)
   "specversion": "1.0",
   "id": "<auditID from apiserver>",
   "source": "urn:k8s:cluster:prod-cluster-01",
-  "type": "com.hpe.k8s.audit.secrets.create",
+  "type": "com.microservicesmonitor.k8s.audit.secrets.create",
   "time": "2026-04-03T10:00:00Z",
   "invocationtime": "2026-04-03T10:00:00.000Z",
   "completetime":   "2026-04-03T10:00:00.012Z",
   "dataContentType": "application/json",
-  "dataSchema": "urn:hpe:security:audit:schema:v1",
+  "dataSchema": "urn:microservices-monitor:security:audit:schema:v1",
   "securityRelevant": "yes",
   "data": {
     "source": {
@@ -265,3 +265,38 @@ EXPECTED PAYLOAD SHAPE (one event example)
     }
   }
 }
+
+=================================================================
+FALCO (runtime security) + POINT 4 (retention) — reference
+=================================================================
+
+Falco (Helm)
+------------
+- Namespace: falco (label project=ecommerce-platform so NetworkPolicy allows POST to audit-service).
+- Install:  microservices-app\k8s\install-falco.bat
+  Or after run-project.bat (runs same unless SKIP_FALCO=1).
+- Chart sends alerts via falcosidekick webhook to:
+    http://audit-service.ecommerce.svc.cluster.local:8005/ingest/falco
+- They are normalized (source_type=falco, classification=falco_<rule_slug>, e.g. falco_terminal_shell_in_container), tagged runtime-falco,
+  and appear in the control-plane UI like other events (in-memory store).
+
+Manual test (port-forward audit on 18015, PowerShell; escape inner quotes):
+  curl.exe -s -X POST "http://127.0.0.1:18015/ingest/falco" ^
+    -H "Content-Type: application/json" ^
+    -d "{\"rule\":\"Terminal shell in container\",\"priority\":\"Warning\",\"output\":\"demo falco test\",\"time\":\"2026-04-03T12:00:00Z\"}"
+
+Point 4 — on-disk apiserver audit log (not Falco-specific)
+---------------------------------------------------------
+Configured in run-project.bat on minikube start:
+  apiserver.audit-log-maxsize   (MB, rotate current file)
+  apiserver.audit-log-maxbackup (how many rotated files to keep)
+  apiserver.audit-log-maxage      (days; drop old rotated files)
+
+Vector DaemonSet (kube-control-plane-audit-forwarder) tails:
+  /host/var/log/kubernetes/audit/audit.log*  and  /host/var/log/audit.log
+
+Point 4 — in-memory UI buffer (optional)
+----------------------------------------
+Env on audit-service: EVENT_STORE_MAX_EVENTS, EVENT_STORE_TTL_SECONDS (0 = only max count applies).
+OpenSearch is optional and off by default; the UI does not read OpenSearch.
+

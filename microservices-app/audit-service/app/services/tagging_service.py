@@ -17,6 +17,11 @@ class TaggingService:
 
     def build_tags(self, event: Dict[str, Any]) -> List[str]:
         tags: List[str] = []
+        cls = event.get("classification")
+        if isinstance(cls, str) and cls.strip():
+            tags.append(f"classification:{cls.strip()}")
+        if event.get("source_type") == "falco":
+            tags.append("runtime-falco")
         msg = (event.get("message") or "") + " " + (event.get("event_type") or "")
 
         if self._re_priv_escalation.search(msg):

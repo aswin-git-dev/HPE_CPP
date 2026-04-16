@@ -164,7 +164,7 @@ Write-Host "[VERIFY] Waiting 10s for Vector to forward all events..." -Foregroun
 Start-Sleep -Seconds 10
 
 Write-Host "`n[VERIFY] Classification breakdown (newest 2000 events):`n" -ForegroundColor Cyan
-$e = (Invoke-RestMethod "http://127.0.0.1:18015/control-plane/events/hpe?limit=2000").events
+$e = (Invoke-RestMethod "http://127.0.0.1:18015/control-plane/events/monitor?limit=2000").events
 $e | Group-Object { $_.data.network.classification } | Sort-Object Count -Descending | `
     Format-Table @{L="Classification";E={$_.Name};Width=40}, @{L="Count";E={$_.Count}} -AutoSize
 

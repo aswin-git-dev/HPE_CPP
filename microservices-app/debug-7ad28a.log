@@ -1,2 +1,0 @@
-{"sessionId":"7ad28a","runId":"k8s-only","hypothesisId":"H6","location":"microservices-app/k8s/stop-docker-compose-for-k8s-only.bat","message":"before docker compose down","data":{},"timestamp":1774914215111}
-{"sessionId":"7ad28a","runId":"k8s-only","hypothesisId":"H1","location":"microservices-app/k8s/stop-docker-compose-for-k8s-only.bat","message":"docker compose down completed","data":{"exitCode":1},"timestamp":1774914249012}

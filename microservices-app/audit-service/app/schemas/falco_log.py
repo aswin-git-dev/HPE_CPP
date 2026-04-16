@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FalcoK8s(BaseModel):
@@ -20,7 +20,7 @@ class FalcoProc(BaseModel):
 
 
 class FalcoAlertIn(BaseModel):
-    # Falco formats vary; keep these as optional and preserve raw.
+    # Falco / falcosidekick JSON shapes vary; unknown keys kept via extra='allow'.
     time: Optional[str] = None
     rule: Optional[str] = None
     priority: Optional[str] = None
@@ -32,7 +32,7 @@ class FalcoAlertIn(BaseModel):
     proc: Optional[FalcoProc] = None
 
     fields: Dict[str, Any] = Field(default_factory=dict, description="Falco 'fields' payload")
-    extra: Dict[str, Any] = Field(default_factory=dict, description="Catch-all for other Falco keys")
+    output_fields: Optional[Dict[str, Any]] = Field(default=None, description="Falcosidekick / JSON output_fields")
 
-    model_config = {"populate_by_name": True}
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
 

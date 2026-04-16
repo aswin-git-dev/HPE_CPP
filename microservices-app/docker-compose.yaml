@@ -147,20 +147,23 @@ services:
       ENV: "dev"
       LOG_LEVEL: "INFO"
       PORT: "8005"
+      EVENT_STORE_MAX_EVENTS: "5000"
+      EVENT_STORE_TTL_SECONDS: "0"
       IGNORED_NAMESPACES: "kube-system,kube-public,kube-node-lease"
       STORE_RAW_EVENT: "true"
       RAW_EVENT_MAX_BYTES: "64000"
+      # Control-plane UI uses in-memory store only; OpenSearch is optional (enable if you want a search index).
+      OPENSEARCH_ENABLED: "false"
       OPENSEARCH_URL: "http://opensearch:9200"
       OPENSEARCH_INDEX: "audit-events"
       OPENSEARCH_VERIFY_CERTS: "false"
       OPENSEARCH_TIMEOUT_S: "10"
       OPENSEARCH_MAX_RETRIES: "3"
+      OPENSEARCH_EVENTS_TTL_DAYS: "0"
+      OPENSEARCH_PURGE_INTERVAL_HOURS: "6"
       ENABLE_METRICS: "true"
     ports:
       - "8005:8005"
-    depends_on:
-      opensearch:
-        condition: service_started
     networks:
       - ecommerce-net
 

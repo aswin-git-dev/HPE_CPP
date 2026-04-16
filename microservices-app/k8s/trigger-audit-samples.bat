@@ -61,6 +61,6 @@ echo.
 
 echo ============================================================
 echo  Refresh the Control-Plane UI or JSON:
-echo  http://127.0.0.1:18015/control-plane/events/hpe?limit=50
+echo  http://127.0.0.1:18015/control-plane/events/monitor?limit=50
 echo ============================================================
 pause

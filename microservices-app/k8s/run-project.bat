@@ -1,10 +1,10 @@
 @echo off
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
-title HPE Control-Plane Monitor — Runner
+title microservices-Monitor — Runner
 
 echo ============================================================
-echo  HPE Control-Plane Monitor - K8s Runner
+echo  microservices-Monitor - K8s Runner
 echo ============================================================
 echo  Build: 2026-04-02  Step 5 waits on: kubectl rollout status deployment/audit-service
 echo  If you see "kubectl wait" and TWO pod names + "5 min ERROR" - OLD .bat - save/git pull this file.
@@ -31,6 +31,11 @@ echo.
 REM ── 2. Start minikube (3 nodes: 1 control-plane + 2 workers) ────────────────
 echo [2/5] Starting minikube (3 nodes, 2 CPU / 2 GB each)...
 echo      First run downloads kicbase image (~514 MB) - normal, be patient.
+REM  --- Point 4: On-disk apiserver audit log retention (rotation + TTL on disk) ---
+REM       maxsize = rotate when file reaches this many MB
+REM       maxbackup = keep at most this many rotated files (plus current)
+REM       maxage    = delete rotated files older than this many days
+REM       (Control-plane UI reads in-memory events in audit-service, not OpenSearch.)
 minikube start ^
   --driver=docker ^
   --nodes=3 ^
@@ -63,7 +68,7 @@ echo      Labeling worker nodes...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0label-minikube-workers.ps1"
 echo.
 echo      Node layout:
-kubectl get nodes -L hpe/node-group,hpe/node-name
+kubectl get nodes -L microservices-monitor/node-group,microservices-monitor/node-name
 echo.
 
 REM ── 3. Patch kube-apiserver with audit-log hostPath volume ───
@@ -244,13 +249,24 @@ timeout /t 1 /nobreak >nul
 start "pf-notification" cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n notification-ns  svc/notification-service 18104:80
 
 echo.
+echo [Falco] Optional runtime security (set SKIP_FALCO=1 to skip^).
+if /I "%SKIP_FALCO%"=="1" (
+  echo      SKIP_FALCO=1 - not installing Falco.
+) else (
+  where helm >nul 2>&1 && (
+    call "%~dp0install-falco.bat" NOPAUSE
+    if errorlevel 1 echo      NOTE: Falco Helm step failed — see messages above ^(kernel/driver or chart values^).
+  ) || echo      Skipped: helm not on PATH. Run install-falco.bat when Helm is installed.
+)
+
+echo.
 echo ============================================================
 echo  ALL DONE - keep the pf-* windows open!
 echo ============================================================
 echo.
 echo   [Monitor UI]       http://127.0.0.1:18015/control-plane/ui
 echo   [Architecture]     http://127.0.0.1:18015/control-plane/architecture/ui
-echo   [HPE Audit JSON]   http://127.0.0.1:18015/control-plane/events/hpe?limit=50
+echo   [Monitor Audit JSON] http://127.0.0.1:18015/control-plane/events/monitor?limit=50
 echo   [Raw Events JSON]  http://127.0.0.1:18015/control-plane/events
 echo.
 echo   [User service]         http://127.0.0.1:18100
@@ -285,6 +301,7 @@ echo TIPs:
 echo   SET SKIP_IMAGE_BUILD=1    skip Docker image builds on re-run
 echo   SET SKIP_AUDIT_WAIT=1     skip rollout wait at step 5
 echo   SET SKIP_BROWSER=1        skip auto-opening browser tabs
+echo   SET SKIP_FALCO=1          skip Helm install of Falco at the end
 echo   See sample-audit-triggers.txt for full event + classification catalog
 echo.
 echo This window stays open. Type EXIT to close.

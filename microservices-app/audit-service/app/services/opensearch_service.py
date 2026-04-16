@@ -17,7 +17,8 @@ DEFAULT_INDEX_MAPPING: Dict[str, Any] = {
     "settings": {
         "index": {
             "number_of_shards": 1,
-            "number_of_replicas": 1,
+            # Single-node / Minikube: avoid yellow cluster (unassigned replicas).
+            "number_of_replicas": 0,
         }
     },
     "mappings": {
@@ -34,6 +35,7 @@ DEFAULT_INDEX_MAPPING: Dict[str, Any] = {
             "event_type": {"type": "keyword"},
             "message": {"type": "text"},
             "classification": {"type": "keyword"},
+            "detection_layer": {"type": "keyword"},
             "action": {"type": "keyword"},
             "resource": {"type": "keyword"},
             "resource_name": {"type": "keyword"},
@@ -87,7 +89,12 @@ class OpenSearchService:
         try:
             self.client.indices.put_mapping(
                 index=self.index,
-                body={"properties": {"classification": {"type": "keyword"}}},
+                body={
+                    "properties": {
+                        "classification": {"type": "keyword"},
+                        "detection_layer": {"type": "keyword"},
+                    }
+                },
             )
         except Exception:
             # Mapping updates are best-effort; dynamic mappings can still work.
@@ -100,8 +107,39 @@ class OpenSearchService:
         reraise=True,
     )
     def index_event(self, event: Dict[str, Any]) -> None:
-        # Use event_id as document _id to deduplicate at index-level
-        self.client.index(index=self.index, id=event.get("event_id"), body=event, refresh=False)
+        doc = {k: v for k, v in event.items() if k and not str(k).startswith("_")}
+        eid = doc.get("event_id")
+        kwargs: Dict[str, Any] = {"index": self.index, "body": doc, "refresh": False}
+        if eid:
+            kwargs["id"] = eid
+        self.client.index(**kwargs)
+
+    def purge_older_than(self, days: float) -> int:
+        """
+        Point 4 (downstream): time-based TTL for indexed events of all source_types
+        (k8s_audit, app, falco). Complements apiserver on-disk rotation, not a substitute.
+        """
+        if days <= 0:
+            return 0
+        try:
+            if not self.client.indices.exists(index=self.index):
+                return 0
+        except Exception:
+            return 0
+        age_days = max(1, int(days))
+        body = {"query": {"range": {"timestamp": {"lt": f"now-{age_days}d"}}}}
+        try:
+            resp = self.client.delete_by_query(
+                index=self.index,
+                body=body,
+                refresh=True,
+                conflicts="proceed",
+                wait_for_completion=True,
+            )
+            return int(resp.get("deleted") or 0)
+        except Exception:
+            logger.exception("opensearch_delete_by_query_failed", extra={"index": self.index})
+            raise
 
     def ping(self) -> bool:
         try:

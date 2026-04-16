@@ -19,6 +19,11 @@ data:
   RAW_EVENT_MAX_BYTES: "64000"
   # RETAINED_FIELDS: "event_id,timestamp,source_type,namespace,service_name,severity,event_type,message,tags,status_code"
 
+  # Optional: OpenSearch dual-write (UI does not use it — control-plane reads EventStore in memory).
+  # OPENSEARCH_ENABLED: "true"
+  # OPENSEARCH_URL: "http://opensearch:9200"
+  # OPENSEARCH_INDEX: "audit-events"
+
   # Observability
   ENABLE_METRICS: "true"
 

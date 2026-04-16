@@ -7,12 +7,15 @@ data:
   vector.toml: |
     data_dir = "/var/lib/vector"
 
-    # Supports both:
-    # - kubeadm: /var/log/kubernetes/audit/audit.log
-    # - minikube: /var/log/audit.log
+    # Point 4: kube-apiserver rotates audit.log (flags: audit-log-maxsize, maxbackup, maxage).
+    # Tail the active file plus rotated siblings so Vector does not miss lines after rotation.
+    # Paths: kubeadm /var/log/kubernetes/audit/audit.log; some minikube builds use /var/log/audit.log
     [sources.k8s_audit_file]
     type = "file"
-    include = ["/host/var/log/kubernetes/audit/audit.log", "/host/var/log/audit.log"]
+    include = [
+      "/host/var/log/kubernetes/audit/audit.log*",
+      "/host/var/log/audit.log"
+    ]
     read_from = "beginning"
     ignore_older_secs = 0
 
@@ -129,9 +132,30 @@ data:
       !(health_probe || lease_noise || auth_review_noise)
     '''
 
-    [transforms.only_valid_k8s_audit]
+    # Drop kubelet-initiated pod deletes and SA token rotations.
+    # system:node:* deleting pods = scheduler/kubelet lifecycle management (eviction, rolling-update, crash-restart).
+    # system:node:* creating serviceaccounts/token = automatic projected-volume token refresh every ~48 min.
+    # Neither carries security signal; both generate continuous high-volume noise.
+    [transforms.drop_kubelet_noise]
     type = "filter"
     inputs = ["drop_noise"]
+    condition = '''
+      user = downcase(to_string(.event.user.username) ?? "")
+      verb = downcase(to_string(.event.verb) ?? "")
+      resource = ""
+      subresource = ""
+      if is_object(.event.objectRef) {
+        resource = downcase(to_string(.event.objectRef.resource) ?? "")
+        subresource = downcase(to_string(.event.objectRef.subresource) ?? "")
+      }
+      kubelet_pod_delete   = starts_with(user, "system:node:") && verb == "delete" && resource == "pods"
+      kubelet_token_rotate = starts_with(user, "system:node:") && verb == "create" && resource == "serviceaccounts" && subresource == "token"
+      !(kubelet_pod_delete || kubelet_token_rotate)
+    '''
+
+    [transforms.only_valid_k8s_audit]
+    type = "filter"
+    inputs = ["drop_kubelet_noise"]
     condition = '.event != null && .event.requestURI != null && .event.verb != "unknown"'
 
     [sinks.audit_service]

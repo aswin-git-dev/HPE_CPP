@@ -14,6 +14,19 @@ logger = logging.getLogger("audit-service.ingest")
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
 
+def _index_opensearch(request: Request, retained: Dict[str, Any]) -> None:
+    ost = getattr(request.app.state, "opensearch_service", None)
+    if ost is None:
+        return
+    try:
+        ost.index_event(retained)
+    except Exception:
+        logger.exception(
+            "opensearch_index_failed",
+            extra={"event_id": retained.get("event_id"), "source_type": retained.get("source_type")},
+        )
+
+
 class BulkEvent(BaseModel):
     source_type: Literal["app", "k8s_audit", "falco"]
     event: Dict[str, Any]
@@ -32,6 +45,7 @@ def _process_and_store(request: Request, normalized: Dict[str, Any]) -> bool:
 
     try:
         store.index_event(retained)
+        _index_opensearch(request, retained)
         # update stats using the original normalized values (before retention removal)
         stats.record_processed(SourceType(normalized["source_type"]), severity=_coerce_sev(normalized.get("severity")))
         return True
@@ -112,7 +126,7 @@ def ingest_bulk(payload: List[BulkEvent], request: Request):
             elif item.source_type == "k8s_audit":
                 normalized = normalizer.normalize_k8s_audit(K8sAuditLogIn(**item.event))
             else:
-                normalized = normalizer.normalize_falco(FalcoAlertIn(**item.event))
+                normalized = normalizer.normalize_falco(FalcoAlertIn.model_validate(item.event))
 
             ok = _process_and_store(request, normalized)
             if ok:
