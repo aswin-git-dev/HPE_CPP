@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     )
     cluster_source_urn: str = Field(default="urn:k8s:cluster:prod-cluster-01")
 
+    # Persistent storage path for JSONL event files (PVC mount)
+    persistent_storage_path: Optional[str] = Field(
+        default=None,
+        description="Directory path for persistent JSONL audit event files. None = in-memory only.",
+    )
+
     # Optional secondary index (not used by the control-plane UI — UI reads in-memory EventStore only).
     opensearch_enabled: bool = Field(default=False, description="If true, also index events to OpenSearch.")
     opensearch_url: str = Field(default="http://opensearch:9200")

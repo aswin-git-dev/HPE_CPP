@@ -1,3 +1,17 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: audit-service-data
+  namespace: ecommerce
+  labels:
+    app: audit-service
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,6 +35,8 @@ spec:
     spec:
       terminationGracePeriodSeconds: 15
       serviceAccountName: audit-service-monitor
+      securityContext:
+        fsGroup: 1000    # Ensure write access for appuser inside the container
       affinity:
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -46,11 +62,30 @@ spec:
           value: "8005"
         - name: CLUSTER_SOURCE_URN
           value: "urn:k8s:cluster:prod-cluster-01"
-        # UI event ring buffer: max rows + optional time TTL (Point 4 in-memory; disk audit is apiserver flags in run-project.bat)
+        # UI event ring buffer: max rows + optional time TTL
         - name: EVENT_STORE_MAX_EVENTS
           value: "10000"
         - name: EVENT_STORE_TTL_SECONDS
           value: "0"
+        # Persistent storage for audit events (survives pod restarts)
+        - name: PERSISTENT_STORAGE_PATH
+          value: "/data/audit-events"
+        # OpenSearch integration (Vector also pushes directly; this is audit-service's own indexing)
+        - name: OPENSEARCH_ENABLED
+          value: "true"
+        - name: OPENSEARCH_URL
+          value: "http://opensearch.ecommerce.svc.cluster.local:9200"
+        - name: OPENSEARCH_INDEX
+          value: "audit-events"
+        - name: OPENSEARCH_EVENTS_TTL_DAYS
+          value: "15"
+        volumeMounts:
+        - name: audit-data
+          mountPath: /data/audit-events
+      volumes:
+      - name: audit-data
+        persistentVolumeClaim:
+          claimName: audit-service-data
 ---
 apiVersion: v1
 kind: ServiceAccount

@@ -129,6 +129,10 @@ timeout /t 2 /nobreak >nul
 kubectl apply -f network-policy.yaml
 kubectl apply -f mongo-deployment.yaml
 kubectl apply -f mongo-service.yaml
+kubectl apply -f opensearch.yaml
+kubectl apply -f opensearch-dashboards.yaml
+kubectl apply -f loki.yaml
+kubectl apply -f grafana.yaml
 kubectl apply -f audit-service.yaml
 kubectl apply -f vector.yaml
 kubectl apply -f kube-control-plane-audit-forwarder.yaml
@@ -145,7 +149,10 @@ kubectl apply -f notification-service.yaml
 kubectl apply -f hpa.yaml
 kubectl apply -f pdb.yaml
 kubectl apply -f control-plane.yaml
-echo      Manifests applied.
+REM ISM Job: delete old job if exists (re-runs), then apply fresh
+kubectl delete job opensearch-ism-setup -n ecommerce >nul 2>&1
+kubectl apply -f opensearch-ism-job.yaml
+echo      Manifests applied (including OpenSearch, Loki, Grafana, ISM TTL).
 echo.
 
 REM ── Build images (use GOTO not giant "else (" blocks — nested parens break cmd.exe) ──
@@ -247,6 +254,10 @@ timeout /t 1 /nobreak >nul
 start "pf-payment"      cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n order-ns         svc/payment-service      18103:80
 timeout /t 1 /nobreak >nul
 start "pf-notification" cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n notification-ns  svc/notification-service 18104:80
+timeout /t 1 /nobreak >nul
+start "pf-grafana"      cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n ecommerce        svc/grafana              3000:3000
+timeout /t 1 /nobreak >nul
+start "pf-opensearch-ui" cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n ecommerce       svc/opensearch-dashboards 5601:5601
 
 echo.
 echo [Falco] Optional runtime security (set SKIP_FALCO=1 to skip^).
@@ -264,16 +275,19 @@ echo ============================================================
 echo  ALL DONE - keep the pf-* windows open!
 echo ============================================================
 echo.
-echo   [Monitor UI]       http://127.0.0.1:18015/control-plane/ui
-echo   [Architecture]     http://127.0.0.1:18015/control-plane/architecture/ui
-echo   [Monitor Audit JSON] http://127.0.0.1:18015/control-plane/events/monitor?limit=50
-echo   [Raw Events JSON]  http://127.0.0.1:18015/control-plane/events
+echo   [Monitor UI]            http://127.0.0.1:18015/control-plane/ui
+echo   [Architecture]          http://127.0.0.1:18015/control-plane/architecture/ui
+echo   [Monitor Audit JSON]    http://127.0.0.1:18015/control-plane/events/monitor?limit=50
+echo   [Raw Events JSON]       http://127.0.0.1:18015/control-plane/events
 echo.
-echo   [User service]         http://127.0.0.1:18100
-echo   [Product service]      http://127.0.0.1:18101
-echo   [Order service]        http://127.0.0.1:18102
-echo   [Payment service]      http://127.0.0.1:18103
-echo   [Notification service] http://127.0.0.1:18104
+echo   [Grafana Dashboards]    http://127.0.0.1:3000  (admin/admin)
+echo   [OpenSearch Dashboards] http://127.0.0.1:5601
+echo.
+echo   [User service]          http://127.0.0.1:18100
+echo   [Product service]       http://127.0.0.1:18101
+echo   [Order service]         http://127.0.0.1:18102
+echo   [Payment service]       http://127.0.0.1:18103
+echo   [Notification service]  http://127.0.0.1:18104
 echo ============================================================
 echo.
 
@@ -287,6 +301,10 @@ timeout /t 3 /nobreak >nul
 start "" "http://127.0.0.1:18015/control-plane/ui"
 timeout /t 1 /nobreak >nul
 start "" "http://127.0.0.1:18015/control-plane/architecture/ui"
+timeout /t 1 /nobreak >nul
+start "" "http://127.0.0.1:3000"
+timeout /t 1 /nobreak >nul
+start "" "http://127.0.0.1:5601"
 :skip_browser
 
 echo.

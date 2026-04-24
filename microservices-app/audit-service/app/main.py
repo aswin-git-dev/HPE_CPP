@@ -39,6 +39,7 @@ def create_app() -> FastAPI:
     app.state.event_store_service = EventStoreService(
         max_events=settings.event_store_max_events,
         ttl_seconds=settings.event_store_ttl_seconds,
+        persistent_path=settings.persistent_storage_path,
     )
     app.state.k8s_monitor_service = K8sMonitorService()
     app.state.opensearch_service = None

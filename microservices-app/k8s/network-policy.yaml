@@ -72,7 +72,7 @@ spec:
           port: 27017
 
 ---
-# 3. Allow OpenSearch ingress from all namespaces (for audit)
+# 3. Allow OpenSearch ingress from all project namespaces + falco
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -86,10 +86,69 @@ spec:
     - Ingress
   ingress:
     - from:
-        - podSelector: {}    # Within ecommerce (audit-service, dashboards)
+        - podSelector: {}    # Within ecommerce (audit-service, dashboards, vector, ISM job)
       ports:
         - protocol: TCP
           port: 9200
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              project: ecommerce-platform   # falco-namespace carries this label
+      ports:
+        - protocol: TCP
+          port: 9200
+
+---
+# 3b. Allow Loki ingress from all project namespaces + falco
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-loki
+  namespace: ecommerce
+spec:
+  podSelector:
+    matchLabels:
+      app: loki
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}    # Within ecommerce (vector, grafana)
+      ports:
+        - protocol: TCP
+          port: 3100
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              project: ecommerce-platform   # falcosidekick in falco namespace
+      ports:
+        - protocol: TCP
+          port: 3100
+
+---
+# 3c. Allow Grafana ingress (UI access via port-forward)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-grafana
+  namespace: ecommerce
+spec:
+  podSelector:
+    matchLabels:
+      app: grafana
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 3000
+    - from:
+        - namespaceSelector: {}   # port-forward from any namespace
+      ports:
+        - protocol: TCP
+          port: 3000
 
 ---
 # 4. Allow audit-service ingress from all microservice namespaces + ecommerce

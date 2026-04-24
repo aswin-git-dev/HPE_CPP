@@ -95,6 +95,7 @@ data:
 
       . = {
         "source_type": "k8s_audit",
+        "source": "audit",
         "event": audit_event
       }
     '''
@@ -166,6 +167,31 @@ data:
     encoding.codec = "json"
     batch.max_events = 10
     batch.timeout_secs = 2
+    request.timeout_secs = 10
+    healthcheck.enabled = false
+
+    # ── Loki sink — feeds Grafana dashboards ──────────────────────────────────
+    [sinks.loki]
+    type = "loki"
+    inputs = ["only_valid_k8s_audit"]
+    endpoint = "http://loki.ecommerce.svc.cluster.local:3100"
+    encoding.codec = "json"
+    labels.source_type = "k8s_audit"
+    labels.source = "audit"
+    labels.verb = "{{ event.verb }}"
+    labels.resource = "{{ event.objectRef.resource }}"
+    batch.max_events = 20
+    batch.timeout_secs = 3
+    healthcheck.enabled = false
+
+    # ── OpenSearch sink — feeds OpenSearch Dashboards ──────────────────────────
+    [sinks.opensearch]
+    type = "elasticsearch"
+    inputs = ["only_valid_k8s_audit"]
+    endpoints = ["http://opensearch.ecommerce.svc.cluster.local:9200"]
+    bulk.index = "k8s-audit-%Y.%m.%d"
+    batch.max_events = 20
+    batch.timeout_secs = 3
     request.timeout_secs = 10
     healthcheck.enabled = false
 

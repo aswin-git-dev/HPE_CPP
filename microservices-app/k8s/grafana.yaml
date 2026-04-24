@@ -1,0 +1,402 @@
+# ─── Grafana — Visualization Dashboard for K8s Audit & Falco Logs ────────────
+# Single-instance Grafana deployment with auto-provisioned:
+#   1. Loki data source
+#   2. K8s Audit Log Dashboard
+#   3. Falco Runtime Security Dashboard
+#
+# Access: http://127.0.0.1:3000  (port-forwarded from run-project.bat)
+# Default login: admin / admin (change on first login)
+
+# ════════════════════════════════════════════════════════════════════════════════
+# GRAFANA DATASOURCE PROVISIONING
+# ════════════════════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: ecommerce
+  labels:
+    app: grafana
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        type: loki
+        access: proxy
+        url: http://loki.ecommerce.svc.cluster.local:3100
+        isDefault: true
+        editable: false
+        jsonData:
+          maxLines: 5000
+
+---
+# ════════════════════════════════════════════════════════════════════════════════
+# GRAFANA DASHBOARD PROVISIONING CONFIG
+# ════════════════════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: ecommerce
+  labels:
+    app: grafana
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: 'default'
+        orgId: 1
+        folder: 'Kubernetes Security'
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards
+          foldersFromFilesStructure: false
+
+---
+# ════════════════════════════════════════════════════════════════════════════════
+# GRAFANA DASHBOARDS — K8s Audit + Falco
+# ════════════════════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: ecommerce
+  labels:
+    app: grafana
+data:
+  k8s-audit-dashboard.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "title": "Audit Events Over Time",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+          "datasource": { "type": "loki", "uid": "" },
+          "targets": [
+            {
+              "expr": "sum(count_over_time({source_type=\"k8s_audit\"} [5m])) by (verb)",
+              "legendFormat": "{{verb}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "color": { "mode": "palette-classic" } }
+          }
+        },
+        {
+          "title": "Audit Events by Verb",
+          "type": "piechart",
+          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+          "datasource": { "type": "loki", "uid": "" },
+          "targets": [
+            {
+              "expr": "sum(count_over_time({source_type=\"k8s_audit\"} [$__range])) by (verb)",
+              "legendFormat": "{{verb}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "title": "Audit Events by Resource",
+          "type": "piechart",
+          "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+          "datasource": { "type": "loki", "uid": "" },
+          "targets": [
+            {
+              "expr": "sum(count_over_time({source_type=\"k8s_audit\"} [$__range])) by (resource)",
+              "legendFormat": "{{resource}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "title": "Error Responses (4xx/5xx)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+          "datasource": { "type": "loki", "uid": "" },
+          "targets": [
+            {
+              "expr": "count_over_time({source_type=\"k8s_audit\"} |= \"Failure\" [5m])",
+              "legendFormat": "Failures",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "title": "Recent Audit Events (Live Tail)",
+          "type": "logs",
+          "gridPos": { "h": 12, "w": 24, "x": 0, "y": 16 },
+          "datasource": { "type": "loki", "uid": "" },
+          "targets": [
+            {
+              "expr": "{source_type=\"k8s_audit\"}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "showLabels": true,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": true,
+            "enableLogDetails": true,
+            "sortOrder": "Descending"
+          }
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["kubernetes", "audit", "security"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Kubernetes Audit Logs",
+      "uid": "k8s-audit-logs",
+      "version": 1
+    }
+  falco-dashboard.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "title": "Falco Alerts Over Time",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+          "datasource": { "type": "loki", "uid": "" },
+          "targets": [
+            {
+              "expr": "sum(count_over_time({rule!=\"\"} [$__interval])) by (priority)",
+              "legendFormat": "{{priority}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "color": { "mode": "palette-classic" } }
+          }
+        },
+        {
+          "title": "Falco Alerts by Priority",
+          "type": "piechart",
+          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+          "datasource": { "type": "loki", "uid": "" },
+          "targets": [
+            {
+              "expr": "sum(count_over_time({rule!=\"\"} [$__range])) by (priority)",
+              "legendFormat": "{{priority}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "title": "Falco Alerts by Rule",
+          "type": "barchart",
+          "gridPos": { "h": 8, "w": 16, "x": 8, "y": 8 },
+          "datasource": { "type": "loki", "uid": "" },
+          "targets": [
+            {
+              "expr": "sum(count_over_time({rule!=\"\"} [$__range])) by (rule)",
+              "legendFormat": "{{rule}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "title": "Critical & Warning Alerts",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 12, "x": 0, "y": 16 },
+          "datasource": { "type": "loki", "uid": "" },
+          "targets": [
+            {
+              "expr": "sum(count_over_time({rule!=\"\" , priority=~\"Critical|Warning|Emergency|Alert\"} [$__range]))",
+              "legendFormat": "Critical+Warning",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 5 },
+                  { "color": "red", "value": 20 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Informational Alerts",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 12, "x": 12, "y": 16 },
+          "datasource": { "type": "loki", "uid": "" },
+          "targets": [
+            {
+              "expr": "sum(count_over_time({rule!=\"\" , priority=~\"Notice|Info|Informational|Debug\"} [$__range]))",
+              "legendFormat": "Info+Notice",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "title": "Recent Falco Alerts (Live Tail)",
+          "type": "logs",
+          "gridPos": { "h": 12, "w": 24, "x": 0, "y": 20 },
+          "datasource": { "type": "loki", "uid": "" },
+          "targets": [
+            {
+              "expr": "{rule!=\"\"}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "showLabels": true,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": true,
+            "enableLogDetails": true,
+            "sortOrder": "Descending"
+          }
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["falco", "runtime", "security", "kernel"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Falco Runtime Security",
+      "uid": "falco-runtime-security",
+      "version": 1
+    }
+
+---
+# ════════════════════════════════════════════════════════════════════════════════
+# GRAFANA DEPLOYMENT
+# ════════════════════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: ecommerce
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      securityContext:
+        fsGroup: 472
+        runAsUser: 472
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: microservices-monitor/node-group
+                    operator: In
+                    values:
+                      - worker2
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: "admin"
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: "admin"
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            - name: GF_INSTALL_PLUGINS
+              value: ""
+          volumeMounts:
+            - name: grafana-datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: grafana-dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+              readOnly: true
+            - name: grafana-dashboards
+              mountPath: /var/lib/grafana/dashboards
+              readOnly: true
+            - name: grafana-data
+              mountPath: /var/lib/grafana
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "150Mi"
+            limits:
+              cpu: "300m"
+              memory: "300Mi"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 120
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 600
+            periodSeconds: 15
+      volumes:
+        - name: grafana-datasources
+          configMap:
+            name: grafana-datasources
+        - name: grafana-dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
+        - name: grafana-dashboards
+          configMap:
+            name: grafana-dashboards
+        - name: grafana-data
+          emptyDir: {}
+
+---
+# ════════════════════════════════════════════════════════════════════════════════
+# GRAFANA SERVICE
+# ════════════════════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: ecommerce
+  labels:
+    app: grafana
+spec:
+  type: ClusterIP
+  selector:
+    app: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000

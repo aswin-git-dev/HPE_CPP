@@ -33,3 +33,10 @@ spec:
         env:
         - name: MONGO_INITDB_DATABASE
           value: "userdb"
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "100Mi"
+          limits:
+            cpu: "300m"
+            memory: "256Mi"

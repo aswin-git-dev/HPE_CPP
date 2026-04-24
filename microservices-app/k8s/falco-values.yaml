@@ -2,6 +2,7 @@
 # Install: install-falco.bat (requires Helm). Namespace `falco` must carry project=ecommerce-platform for NetworkPolicy.
 #
 # Covers filesystem access, process/exec, and default rulesets; alerts POST to /ingest/falco as JSON.
+# Also forwards to Loki (Grafana) and OpenSearch for visualization dashboards.
 
 tty: false
 
@@ -16,9 +17,21 @@ falcosidekick:
   enabled: true
   replicaCount: 1
   # Must be under `config` — top-level `webhook` is ignored by the falcosidekick subchart
-  # (WEBHOOK_ADDRESS stayed empty → "Enabled Outputs: []").
+  # (WEBHOOK_ADDRESS stayed empty -> "Enabled Outputs: []").
   config:
     webhook:
       address: "http://audit-service.ecommerce.svc.cluster.local:8005/ingest/falco"
       method: "POST"
       checkcert: false
+    # ── Loki output — feeds Grafana dashboards ──────────────────────────────
+    loki:
+      hostport: "http://loki.ecommerce.svc.cluster.local:3100"
+      customheaders: ""
+      extralabels: "source_type:falco,source:falco"
+    # ── Elasticsearch output — feeds OpenSearch Dashboards ──────────────────
+    elasticsearch:
+      hostport: "http://opensearch.ecommerce.svc.cluster.local:9200"
+      index: "falco-alerts"
+      type: "_doc"
+      suffix: "daily"
+
