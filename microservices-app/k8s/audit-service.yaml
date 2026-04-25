@@ -1,0 +1,130 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: audit-service-data
+  namespace: ecommerce
+  labels:
+    app: audit-service
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-service
+  namespace: ecommerce
+  labels:
+    app: audit-service
+spec:
+  replicas: 1
+  # Single replica: Recreate avoids "old replica pending termination" sitting forever during
+  # rolling updates (common on Minikube). Brief downtime on deploy is OK for dev.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: audit-service
+  template:
+    metadata:
+      labels:
+        app: audit-service
+    spec:
+      terminationGracePeriodSeconds: 15
+      serviceAccountName: audit-service-monitor
+      securityContext:
+        fsGroup: 1000    # Ensure write access for appuser inside the container
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: microservices-monitor/node-group
+                    operator: In
+                    values:
+                      - worker2
+      containers:
+      - name: audit-service
+        image: audit-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8005
+        env:
+        - name: ENV
+          value: "dev"
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: PORT
+          value: "8005"
+        - name: CLUSTER_SOURCE_URN
+          value: "urn:k8s:cluster:prod-cluster-01"
+        # UI event ring buffer: max rows + optional time TTL
+        - name: EVENT_STORE_MAX_EVENTS
+          value: "10000"
+        - name: EVENT_STORE_TTL_SECONDS
+          value: "0"
+        # Persistent storage for audit events (survives pod restarts)
+        - name: PERSISTENT_STORAGE_PATH
+          value: "/data/audit-events"
+        # OpenSearch integration (Vector also pushes directly; this is audit-service's own indexing)
+        - name: OPENSEARCH_ENABLED
+          value: "true"
+        - name: OPENSEARCH_URL
+          value: "http://opensearch.ecommerce.svc.cluster.local:9200"
+        - name: OPENSEARCH_INDEX
+          value: "audit-events"
+        - name: OPENSEARCH_EVENTS_TTL_DAYS
+          value: "15"
+        volumeMounts:
+        - name: audit-data
+          mountPath: /data/audit-events
+      volumes:
+      - name: audit-data
+        persistentVolumeClaim:
+          claimName: audit-service-data
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: audit-service-monitor
+  namespace: ecommerce
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: audit-service-monitor-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes", "services"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: audit-service-monitor-reader-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: audit-service-monitor-reader
+subjects:
+  - kind: ServiceAccount
+    name: audit-service-monitor
+    namespace: ecommerce
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audit-service
+  namespace: ecommerce
+spec:
+  type: ClusterIP
+  selector:
+    app: audit-service
+  ports:
+  - name: http
+    port: 8005
+    targetPort: 8005

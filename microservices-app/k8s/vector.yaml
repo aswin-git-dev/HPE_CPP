@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: log-forwarder
+  namespace: ecommerce
+  labels:
+    app: log-forwarder
+spec:
+  selector:
+    matchLabels:
+      app: log-forwarder
+  template:
+    metadata:
+      labels:
+        app: log-forwarder
+    spec:
+      # Runs on ALL nodes (control-plane + WorkerNode1 + WorkerNode2)
+      # so pod logs from every node reach the audit-service.
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+
+      containers:
+      - name: vector
+        image: timberio/vector:0.39.0-debian
+        imagePullPolicy: IfNotPresent
+        command: ["vector", "--config", "/etc/vector/vector.toml"]
+        env:
+        - name: VECTOR_SELF_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        volumeMounts:
+        - name: varlog
+          mountPath: /var/log
+          readOnly: true
+        - name: varlibdockercontainers
+          mountPath: /var/lib/docker/containers
+          readOnly: true
+        - name: vector-config
+          mountPath: /etc/vector/vector.toml
+          subPath: vector.toml
+          readOnly: true
+        - name: vector-data
+          mountPath: /var/lib/vector-app-logs
+        resources:
+          requests:
+            cpu: "30m"
+            memory: "48Mi"
+          limits:
+            cpu: "150m"
+            memory: "128Mi"
+      volumes:
+      - name: varlog
+        hostPath:
+          path: /var/log
+      - name: varlibdockercontainers
+        hostPath:
+          path: /var/lib/docker/containers
+      - name: vector-config
+        configMap:
+          name: vector-config
+      - name: vector-data
+        hostPath:
+          path: /var/lib/vector-app-logs
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-config
+  namespace: ecommerce
+data:
+  vector.toml: |
+    data_dir = "/var/lib/vector-app-logs"
+
+    # Collect pod logs from this node's containers via the /var/log/pods path.
+    # Works on all nodes regardless of container runtime (no docker.sock dependency).
+    [sources.pod_logs]
+    type = "kubernetes_logs"
+    self_node_name = "${VECTOR_SELF_NODE_NAME}"
+    # Only forward logs from our app namespaces — ignore kube-system noise
+    extra_namespace_label_selector = ""
+    exclude_paths_glob_patterns = [
+      "**/kube-system/**",
+      "**/kube-public/**",
+      "**/kube-node-lease/**"
+    ]
+
+    [transforms.add_node_info]
+    type = "remap"
+    inputs = ["pod_logs"]
+    source = '''
+      .source_type = "app_log"
+      .node = get_env_var("VECTOR_SELF_NODE_NAME") ?? "unknown"
+    '''
+
+    [sinks.audit]
+    type = "http"
+    inputs = ["add_node_info"]
+    uri = "http://audit-service.ecommerce.svc.cluster.local:8005/ingest/app"
+    encoding.codec = "json"
+    batch.max_events = 10
+    batch.timeout_secs = 2
+    healthcheck.enabled = false

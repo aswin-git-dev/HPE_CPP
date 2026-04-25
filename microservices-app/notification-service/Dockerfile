@@ -19,9 +19,5 @@ USER appuser
 
 EXPOSE 8004
 
-# Healthcheck for Docker
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8004/health')"
-
 # Run the FastAPI app
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8004"]

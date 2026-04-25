@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opensearch-dashboards
+  namespace: ecommerce
+  labels:
+    app: opensearch-dashboards
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opensearch-dashboards
+  template:
+    metadata:
+      labels:
+        app: opensearch-dashboards
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: microservices-monitor/node-group
+                    operator: In
+                    values:
+                      - worker2
+      containers:
+      - name: opensearch-dashboards
+        image: opensearchproject/opensearch-dashboards:2.11.0
+        ports:
+        - containerPort: 5601
+        env:
+        - name: OPENSEARCH_HOSTS
+          value: '["http://opensearch:9200"]'
+        - name: DISABLE_SECURITY_DASHBOARDS_PLUGIN
+          value: "true"
+        - name: OPENSEARCH_REQUESTTIMEOUT
+          value: "120000"
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "100Mi"
+          limits:
+            cpu: "300m"
+            memory: "250Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch-dashboards
+  namespace: ecommerce
+spec:
+  type: ClusterIP
+  selector:
+    app: opensearch-dashboards
+  ports:
+  - port: 5601
+    targetPort: 5601

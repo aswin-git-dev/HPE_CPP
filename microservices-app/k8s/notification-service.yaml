@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: notification-service
-  namespace: ecommerce
+  namespace: notification-ns
   labels:
     app: notification-service
 spec:

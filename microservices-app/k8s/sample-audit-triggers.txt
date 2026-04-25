@@ -1,0 +1,302 @@
+== microservices-Monitor — Sample Audit Trigger Commands ==
+Run in a terminal where "kubectl" points at your Minikube cluster.
+Port-forward must be running (run-project.bat opens pf-audit on 18015).
+
+IMPORTANT (Windows):
+- These samples work best in **Command Prompt (cmd.exe)**.
+- If you use **PowerShell**, use the "PowerShell" variants shown where noted.
+
+-----------------------------------------------------------------
+URLs (paste in browser after port-forward is up)
+-----------------------------------------------------------------
+  Monitor UI       http://127.0.0.1:18015/control-plane/ui
+  Architecture map http://127.0.0.1:18015/control-plane/architecture/ui
+  Monitor JSON     http://127.0.0.1:18015/control-plane/events/monitor?limit=50
+  Raw events       http://127.0.0.1:18015/control-plane/events
+
+If a URL shows "Not Found" or JSON error, rebuild audit-service and redeploy:
+  cd microservices-app\k8s
+  minikube image build -t audit-service:latest ..\audit-service
+  (then distribute image to m02/m03 per run-project.bat, or run full bat)
+
+=================================================================
+CLASSIFICATION: rbac_change
+Triggers "rbac_change" in data.network.classification
+=================================================================
+
+-----------------------------------------------------------------
+1. RBAC — Create ClusterRole + ClusterRoleBinding (privilege grant)
+   Stages captured: RequestReceived, ResponseStarted, ResponseComplete
+   Tier: RequestResponse (full body logged)
+-----------------------------------------------------------------
+kubectl create clusterrole demo-cr --verb=get,list,watch --resource=secrets
+kubectl create clusterrolebinding demo-crb --clusterrole=demo-cr --user=demo-user@example.com
+kubectl delete clusterrolebinding demo-crb
+kubectl delete clusterrole demo-cr
+
+-----------------------------------------------------------------
+2. RBAC — Namespace-scoped Role + RoleBinding
+-----------------------------------------------------------------
+kubectl -n ecommerce create role demo-role --verb=create,delete --resource=pods
+kubectl -n ecommerce create rolebinding demo-rb --role=demo-role --user=dev-user@example.com
+kubectl -n ecommerce delete rolebinding demo-rb
+kubectl -n ecommerce delete role demo-role
+
+=================================================================
+CLASSIFICATION: secret_access
+Triggers "secret_access" in data.network.classification
+=================================================================
+
+-----------------------------------------------------------------
+3. SECRET — Create, read, delete
+   Tier: RequestResponse (full body including value is logged)
+-----------------------------------------------------------------
+kubectl -n ecommerce create secret generic audit-demo-secret --from-literal=api_key=s3cr3t-v@lue
+kubectl -n ecommerce get secret audit-demo-secret -o json
+kubectl -n ecommerce delete secret audit-demo-secret
+
+-----------------------------------------------------------------
+4. SECRET — Patch (simulates credential rotation)
+-----------------------------------------------------------------
+kubectl -n ecommerce create secret generic rotate-demo --from-literal=token=old-token
+CMD:
+kubectl -n ecommerce patch secret rotate-demo -p "{\"data\":{\"token\":\"bmV3LXRva2Vu\"}}"
+PowerShell:
+kubectl -n ecommerce patch secret rotate-demo -p '{"data":{"token":"bmV3LXRva2Vu"}}'
+kubectl -n ecommerce delete secret rotate-demo
+
+=================================================================
+CLASSIFICATION: exec_access
+Triggers "exec_access" — subresource=exec/attach/portforward
+=================================================================
+
+-----------------------------------------------------------------
+5. POD EXEC — Interactive shell into running pod
+   Stage: RequestReceived + ResponseStarted
+   Subresource: exec  →  objectRef.subresource = "exec"
+-----------------------------------------------------------------
+CMD:
+kubectl -n ecommerce exec deployment/audit-service -- python -c "print('exec-audit-test')"
+
+PowerShell:
+kubectl -n ecommerce exec deployment/audit-service -- python -c 'print("exec-audit-test")'
+
+-----------------------------------------------------------------
+6. POD EXEC — Simulate suspicious shell access
+-----------------------------------------------------------------
+CMD:
+kubectl -n ecommerce exec deployment/audit-service -- sh -c "whoami && id && hostname"
+
+PowerShell:
+kubectl -n ecommerce exec deployment/audit-service -- sh -c 'whoami && id && hostname'
+
+=================================================================
+CLASSIFICATION: privilege_escalation_candidate
+Triggers when ServiceAccount tokens are created / SAs provisioned
+=================================================================
+
+-----------------------------------------------------------------
+7. SERVICE ACCOUNT — Create SA + generate token
+-----------------------------------------------------------------
+kubectl -n ecommerce create serviceaccount priv-demo-sa
+kubectl -n ecommerce create token priv-demo-sa
+kubectl -n ecommerce delete serviceaccount priv-demo-sa
+
+=================================================================
+CLASSIFICATION: config_change
+ConfigMap mutations are security-relevant configuration changes
+=================================================================
+
+-----------------------------------------------------------------
+8. CONFIGMAP — Create, patch, delete
+-----------------------------------------------------------------
+kubectl -n ecommerce create configmap audit-demo-cm --from-literal=env=dev --from-literal=log_level=DEBUG
+CMD:
+kubectl -n ecommerce patch configmap audit-demo-cm -p "{\"data\":{\"env\":\"prod\",\"log_level\":\"INFO\"}}"
+PowerShell:
+kubectl -n ecommerce patch configmap audit-demo-cm -p '{"data":{"env":"prod","log_level":"INFO"}}'
+kubectl -n ecommerce delete configmap audit-demo-cm
+
+=================================================================
+CLASSIFICATION: destructive_change
+Delete on workloads / namespaces flagged for blast-radius review
+=================================================================
+
+-----------------------------------------------------------------
+9. NAMESPACE — Create + delete (blast-radius event)
+-----------------------------------------------------------------
+kubectl create namespace demo-audit-ns
+kubectl delete namespace demo-audit-ns
+
+-----------------------------------------------------------------
+10. DEPLOYMENT — Scale down + delete (destructive change)
+-----------------------------------------------------------------
+kubectl -n ecommerce scale deployment audit-service --replicas=0
+kubectl -n ecommerce scale deployment audit-service --replicas=1
+
+=================================================================
+CLASSIFICATION: unauthorized_access  (simulated 403)
+=================================================================
+
+-----------------------------------------------------------------
+11. AUTH CAN-I — Check permissions (generates SubjectAccessReview)
+-----------------------------------------------------------------
+kubectl auth can-i create secrets -n ecommerce
+kubectl auth can-i delete pods -n kube-system
+kubectl auth can-i --list -n ecommerce
+
+-----------------------------------------------------------------
+12. FORCE a 403 — try to access kube-system as default SA
+-----------------------------------------------------------------
+kubectl -n kube-system get secrets --as=system:serviceaccount:ecommerce:default
+
+=================================================================
+BULK / CHAINED SCENARIOS
+=================================================================
+
+-----------------------------------------------------------------
+13. Full RBAC privilege-escalation chain
+    Create role → bind → access secrets → clean up
+-----------------------------------------------------------------
+  kubectl create namespace sec-demo
+  kubectl -n sec-demo create serviceaccount escalation-sa
+  kubectl -n sec-demo create role sec-reader --verb=get,list --resource=secrets
+  kubectl -n sec-demo create rolebinding sec-rb --role=sec-reader --serviceaccount=sec-demo:escalation-sa
+  kubectl -n sec-demo get secrets --as=system:serviceaccount:sec-demo:escalation-sa
+  kubectl -n sec-demo delete rolebinding sec-rb
+  kubectl -n sec-demo delete role sec-reader
+  kubectl delete namespace sec-demo
+
+-----------------------------------------------------------------
+14. Batch namespace operations (CMD only — run in cmd.exe)
+-----------------------------------------------------------------
+for %i in (ns-alpha ns-beta ns-gamma) do @kubectl create namespace %i
+for %i in (ns-alpha ns-beta ns-gamma) do @kubectl delete namespace %i
+
+PowerShell:
+  foreach ($n in 'ns-alpha','ns-beta','ns-gamma') { kubectl create namespace $n }
+  foreach ($n in 'ns-alpha','ns-beta','ns-gamma') { kubectl delete namespace $n }
+
+-----------------------------------------------------------------
+15. Batch secret + configmap + pod (stress-test the pipeline)
+-----------------------------------------------------------------
+kubectl create namespace batch-demo
+kubectl -n batch-demo create configmap cfg1 --from-literal=x=1
+kubectl -n batch-demo create secret generic sec1 --from-literal=k=v
+kubectl -n batch-demo run p1 --image=busybox:1.36 --restart=Never -- sleep 5
+kubectl -n batch-demo exec p1 -- whoami
+kubectl -n batch-demo delete pod p1 --grace-period=0
+kubectl delete namespace batch-demo
+
+=================================================================
+VERIFY EVENTS APPEARED IN THE PIPELINE
+=================================================================
+
+# Raw normalized events (latest 50)
+curl http://127.0.0.1:18015/control-plane/events?limit=50
+
+# CloudEvents-shaped payload (microservices-Monitor schema)
+curl http://127.0.0.1:18015/control-plane/events/monitor?limit=50
+
+# Filter by classification in microservices-Monitor UI
+http://127.0.0.1:18015/control-plane/ui
+  → use "Classification" dropdown: rbac_change / secret_access / exec_access / config_change
+
+=================================================================
+EXPECTED PAYLOAD SHAPE (one event example)
+=================================================================
+
+{
+  "specversion": "1.0",
+  "id": "<auditID from apiserver>",
+  "source": "urn:k8s:cluster:prod-cluster-01",
+  "type": "com.microservicesmonitor.k8s.audit.secrets.create",
+  "time": "2026-04-03T10:00:00Z",
+  "invocationtime": "2026-04-03T10:00:00.000Z",
+  "completetime":   "2026-04-03T10:00:00.012Z",
+  "dataContentType": "application/json",
+  "dataSchema": "urn:microservices-monitor:security:audit:schema:v1",
+  "securityRelevant": "yes",
+  "data": {
+    "source": {
+      "subject":           "kubernetes-admin",
+      "user":              "kubernetes-admin",
+      "requestRoles":      "system:masters,system:authenticated",
+      "requestPrivileges": "create,secrets",
+      "requestingService": "kubectl/v1.29.0",
+      "requestMethod":     "POST",
+      "requestUrl":        "/api/v1/namespaces/ecommerce/secrets",
+      "requestSource":     "192.168.49.1",
+      "requestPort":       null
+    },
+    "destination": {
+      "requestedCall":       "POST /api/v1/namespaces/ecommerce/secrets",
+      "destination":         "kube-apiserver",
+      "destinationPort":     6443,
+      "l4protocol":          "TCP",
+      "protocolBinding":     "TLS",
+      "encryption":          "TLS 1.3",
+      "destinationService":  "kube-apiserver",
+      "destinationUserRoles": null,
+      "destinationUserPrivs": null,
+      "apiGroup":            null
+    },
+    "network": {
+      "eventLocation": "k8s-control-plane",
+      "stage":         "ResponseComplete",
+      "apiCallResult": "Success",
+      "eventCount":    "1",
+      "statusCode":    201,
+      "classification": "secret_access",
+      "severity":       "info"
+    },
+    "object": {
+      "objname":        "audit-demo-secret",
+      "objtype":        "secrets",
+      "objowner":       "ecommerce",
+      "objperms":       "create,secrets",
+      "objaccessresult":"Success",
+      "assertedroles":  "system:masters,system:authenticated",
+      "assertedprivs":  "create,secrets",
+      "objchanges":     "[ResponseComplete] create secrets audit-demo-secret uri=/api/v1/namespaces/ecommerce/secrets",
+      "objcreatetime":  "2026-04-03T10:00:00.000Z",
+      "objmodtime":     "2026-04-03T10:00:00.012Z",
+      "objdeletetime":  null
+    }
+  }
+}
+
+=================================================================
+FALCO (runtime security) + POINT 4 (retention) — reference
+=================================================================
+
+Falco (Helm)
+------------
+- Namespace: falco (label project=ecommerce-platform so NetworkPolicy allows POST to audit-service).
+- Install:  microservices-app\k8s\install-falco.bat
+  Or after run-project.bat (runs same unless SKIP_FALCO=1).
+- Chart sends alerts via falcosidekick webhook to:
+    http://audit-service.ecommerce.svc.cluster.local:8005/ingest/falco
+- They are normalized (source_type=falco, classification=falco_<rule_slug>, e.g. falco_terminal_shell_in_container), tagged runtime-falco,
+  and appear in the control-plane UI like other events (in-memory store).
+
+Manual test (port-forward audit on 18015, PowerShell; escape inner quotes):
+  curl.exe -s -X POST "http://127.0.0.1:18015/ingest/falco" ^
+    -H "Content-Type: application/json" ^
+    -d "{\"rule\":\"Terminal shell in container\",\"priority\":\"Warning\",\"output\":\"demo falco test\",\"time\":\"2026-04-03T12:00:00Z\"}"
+
+Point 4 — on-disk apiserver audit log (not Falco-specific)
+---------------------------------------------------------
+Configured in run-project.bat on minikube start:
+  apiserver.audit-log-maxsize   (MB, rotate current file)
+  apiserver.audit-log-maxbackup (how many rotated files to keep)
+  apiserver.audit-log-maxage      (days; drop old rotated files)
+
+Vector DaemonSet (kube-control-plane-audit-forwarder) tails:
+  /host/var/log/kubernetes/audit/audit.log*  and  /host/var/log/audit.log
+
+Point 4 — in-memory UI buffer (optional)
+----------------------------------------
+Env on audit-service: EVENT_STORE_MAX_EVENTS, EVENT_STORE_TTL_SECONDS (0 = only max count applies).
+OpenSearch is optional and off by default; the UI does not read OpenSearch.
+

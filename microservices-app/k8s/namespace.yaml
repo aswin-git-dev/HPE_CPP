@@ -1,5 +1,9 @@
-# ─── Namespace ────────────────────────────────────────────────────────────────
-# All ecommerce microservices run in this namespace for isolation.
+# ─── Namespaces ───────────────────────────────────────────────────────────────
+# Namespace per microservice for isolation + a shared infra namespace.
+# Apply order: namespace.yaml FIRST before any other manifests.
+
+# ── 1. Shared Infrastructure Namespace ────────────────────────────────────────
+# Hosts: MongoDB, OpenSearch, Audit Service, Log Forwarder
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -8,3 +12,74 @@ metadata:
     name: ecommerce
     project: ecommerce-platform
     managed-by: kubectl
+    role: infrastructure
+
+---
+# ── 2. User Service Namespace ──────────────────────────────────────────────────
+# Hosts: user-service (handles authentication & user management)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: user-ns
+  labels:
+    name: user-ns
+    project: ecommerce-platform
+    managed-by: kubectl
+    role: microservice
+    service: user
+
+---
+# ── 3. Product Service Namespace ───────────────────────────────────────────────
+# Hosts: product-service (catalog management)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: product-ns
+  labels:
+    name: product-ns
+    project: ecommerce-platform
+    managed-by: kubectl
+    role: microservice
+    service: product
+
+---
+# ── 4. Order Service Namespace ─────────────────────────────────────────────────
+# Hosts: order-service + payment-service (tightly coupled order/payment flow)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: order-ns
+  labels:
+    name: order-ns
+    project: ecommerce-platform
+    managed-by: kubectl
+    role: microservice
+    service: order
+
+---
+# ── 5. Notification Service Namespace ─────────────────────────────────────────
+# Hosts: notification-service (email/SMS alerts)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: notification-ns
+  labels:
+    name: notification-ns
+    project: ecommerce-platform
+    managed-by: kubectl
+    role: microservice
+    service: notification
+
+---
+# ── 6. Control Plane Namespace ─────────────────────────────────────────────────
+# Hosts: Kubernetes Dashboard — cluster-wide visibility of all worker nodes,
+# pods, deployments, and namespaces. Acts as the management control plane UI.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: control-plane
+  labels:
+    name: control-plane
+    project: ecommerce-platform
+    managed-by: kubectl
+    role: control-plane

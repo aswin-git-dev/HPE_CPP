@@ -3,7 +3,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: user-service
-  namespace: ecommerce
+  namespace: user-ns
   labels:
     app: user-service
     tier: backend

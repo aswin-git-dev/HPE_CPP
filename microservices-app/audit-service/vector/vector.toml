@@ -1,0 +1,92 @@
+[api]
+enabled = true
+address = "0.0.0.0:8686"
+
+# Read real container logs via Docker Engine socket
+[sources.docker_logs]
+type = "docker_logs"
+docker_host = "unix:///var/run/docker.sock"
+
+# Keep only your microservices (avoid forwarding opensearch/vector itself)
+[transforms.filter_services]
+type = "filter"
+inputs = ["docker_logs"]
+condition = '(contains(to_string(.container_name) ?? "", "user-service") || contains(to_string(.container_name) ?? "", "product-service") || contains(to_string(.container_name) ?? "", "order-service") || contains(to_string(.container_name) ?? "", "payment-service") || contains(to_string(.container_name) ?? "", "notification-service"))'
+
+# Map Docker log record -> audit-service AppLogIn schema
+[transforms.to_audit_schema]
+type = "remap"
+inputs = ["filter_services"]
+source = '''
+  # Vector's docker_logs usually provides `.message` already; fall back to `.log`
+  raw_container = to_string(.container_name) ?? "unknown-service"
+  raw_id = to_string(.container_id) ?? null
+  msg = to_string(.message) ?? ""
+  if msg == "" {
+    msg = to_string(.log) ?? ""
+  }
+
+  # Build a clean payload that matches audit-service AppLogIn
+  app = {}
+  app.service_name = raw_container
+  app.namespace = "docker-compose"
+  app.pod_name = raw_id
+  app.message = msg
+  app.method = null
+  app.request_path = null
+  app.status_code = null
+  code = null
+
+  # Parse common Uvicorn access log: "GET /path HTTP/1.1" 200 OK
+  http_cap = parse_regex(msg, r'"(?P<m>[A-Z]+)\s+(?P<p>/\S*)\s+HTTP/[^"]+"\s+(?P<c>\d{3})') ?? null
+  if http_cap != null {
+    app.method = http_cap.m
+    app.request_path = http_cap.p
+    code_str = to_string(http_cap.c)
+    tmp_code, tmp_err = to_int(code_str)
+    if tmp_err == null { app.status_code = tmp_code }
+
+    # severity from status code class (4xx/5xx)
+    if starts_with(code_str, "5") {
+      app.log_level = "critical"
+    } else if starts_with(code_str, "4") {
+      app.log_level = "warning"
+    }
+  }
+
+  # Severity inference:
+  # - Prefer HTTP status code (4xx => warning, 5xx => critical)
+  # - Fallback to keyword scan
+  if app.log_level == null {
+    s = downcase(msg)
+    if contains(s, "critical") || contains(s, "panic") || contains(s, "fatal") {
+      app.log_level = "critical"
+    } else if contains(s, "error") || contains(s, "exception") || contains(s, "traceback") {
+      app.log_level = "error"
+    } else if contains(s, "warn") {
+      app.log_level = "warning"
+    } else {
+      app.log_level = "info"
+    }
+  }
+
+  # If the app emits a JSON log, preserve it under `extra.raw`
+  app.extra = {}
+  app.extra.raw = msg
+
+  # Wrap as audit-service bulk ingest item (so batching/arrays are accepted)
+  . = {}
+  .source_type = "app"
+  .event = app
+'''
+
+# POST each event to audit-service ingestion endpoint
+[sinks.audit_ingest]
+type = "http"
+inputs = ["to_audit_schema"]
+uri = "http://audit-service:8005/ingest/bulk"
+method = "post"
+encoding.codec = "json"
+request.timeout_secs = 5
+healthcheck.enabled = false
+

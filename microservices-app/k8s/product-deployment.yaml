@@ -1,10 +1,9 @@
-# ─── Product Service Deployment (Stub) ─────────────────────────────────────────
-# 2 replicas spread across nodes via anti-affinity + topology spread
+# ─── Product Service Deployment ─── WorkerNode1 ─────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: product-service
-  namespace: ecommerce
+  namespace: product-ns
   labels:
     app: product-service
     tier: backend
@@ -24,25 +23,17 @@ spec:
         app: product-service
         tier: backend
     spec:
-      topologySpreadConstraints:
-        - maxSkew: 1
-          topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: ScheduleAnyway
-          labelSelector:
-            matchLabels:
-              app: product-service
       affinity:
-        podAntiAffinity:
+        nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchExpressions:
-                    - key: app
-                      operator: In
-                      values:
-                        - product-service
-                topologyKey: kubernetes.io/hostname
+              preference:
+                matchExpressions:
+                  - key: microservices-monitor/node-group
+                    operator: In
+                    values:
+                      - worker1
+
       containers:
         - name: product-service
           image: product-service:latest
@@ -61,15 +52,3 @@ spec:
             limits:
               cpu: "200m"
               memory: "128Mi"
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8001
-            initialDelaySeconds: 10
-            periodSeconds: 5
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8001
-            initialDelaySeconds: 20
-            periodSeconds: 15

@@ -1,0 +1,282 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-k8s-audit-config
+  namespace: ecommerce
+data:
+  vector.toml: |
+    data_dir = "/var/lib/vector"
+
+    # Point 4: kube-apiserver rotates audit.log (flags: audit-log-maxsize, maxbackup, maxage).
+    # Tail the active file plus rotated siblings so Vector does not miss lines after rotation.
+    # Paths: kubeadm /var/log/kubernetes/audit/audit.log; some minikube builds use /var/log/audit.log
+    [sources.k8s_audit_file]
+    type = "file"
+    include = [
+      "/host/var/log/kubernetes/audit/audit.log*",
+      "/host/var/log/audit.log"
+    ]
+    read_from = "beginning"
+    ignore_older_secs = 0
+
+    [transforms.to_bulk]
+    type = "remap"
+    inputs = ["k8s_audit_file"]
+    source = '''
+      msg = to_string(.message) ?? ""
+      parsed, err = parse_json(msg)
+      if err != null || !is_object(parsed) {
+        parsed = {}
+      }
+
+      . = {}
+      .auditID = to_string(parsed.auditID) ?? null
+      .requestReceivedTimestamp = to_string(parsed.requestReceivedTimestamp) ?? null
+      .stageTimestamp = to_string(parsed.stageTimestamp) ?? null
+      .verb = to_string(parsed.verb) ?? "unknown"
+      .stage = to_string(parsed.stage) ?? null
+      .requestURI = to_string(parsed.requestURI) ?? "/unknown"
+      .userAgent = to_string(parsed.userAgent) ?? null
+
+      user = parsed.user
+      if is_object(user) {
+        .user = {}
+        .user.username = to_string(user.username) ?? null
+        .user.uid = to_string(user.uid) ?? null
+        if is_array(user.groups) {
+          .user.groups = user.groups
+        }
+        if is_object(user.extra) {
+          .user.extra = user.extra
+        }
+      }
+
+      imp = parsed.impersonatedUser
+      if is_object(imp) {
+        .impersonatedUser = {}
+        .impersonatedUser.username = to_string(imp.username) ?? null
+        .impersonatedUser.uid = to_string(imp.uid) ?? null
+        if is_array(imp.groups) {
+          .impersonatedUser.groups = imp.groups
+        }
+      }
+
+      obj = parsed.objectRef
+      if is_object(obj) {
+        .objectRef = {}
+        .objectRef.namespace = to_string(obj.namespace) ?? null
+        .objectRef.resource = to_string(obj.resource) ?? null
+        .objectRef.name = to_string(obj.name) ?? null
+        .objectRef.subresource = to_string(obj.subresource) ?? null
+        .objectRef.apiVersion = to_string(obj.apiVersion) ?? null
+        .objectRef.apiGroup = to_string(obj.apiGroup) ?? null
+      }
+
+      resp = parsed.responseStatus
+      if is_object(resp) {
+        .responseStatus = {}
+        c, cerr = to_int(resp.code)
+        .responseStatus.code = if cerr == null { c } else { null }
+        .responseStatus.status = to_string(resp.status) ?? null
+        .responseStatus.reason = to_string(resp.reason) ?? null
+        .responseStatus.message = to_string(resp.message) ?? null
+      }
+
+      if is_array(parsed.sourceIPs) {
+        .sourceIPs = parsed.sourceIPs
+      }
+
+      ann = parsed.annotations
+      audit_event = .
+      audit_event.annotations = if is_object(ann) { ann } else { {} }
+
+      # Keep entire source event for traceability, but outside strict schema.
+      audit_event.extra = { "raw_event": parsed, "raw_line": msg }
+
+      . = {
+        "source_type": "k8s_audit",
+        "source": "audit",
+        "event": audit_event
+      }
+    '''
+
+    # Drop constant kubelet patch/update noise on core events objects.
+    [transforms.drop_k8s_event_object_churn]
+    type = "filter"
+    inputs = ["to_bulk"]
+    condition = '''
+      r = ""
+      if is_object(.event.objectRef) {
+        r = to_string(.event.objectRef.resource) ?? ""
+      }
+      v = downcase(to_string(.event.verb) ?? "")
+      !(r == "events" && (v == "patch" || v == "update"))
+    '''
+
+    # Drop pure read-only non-security noise (healthz, metrics, leases, tokenreviews).
+    [transforms.drop_noise]
+    type = "filter"
+    inputs = ["drop_k8s_event_object_churn"]
+    condition = '''
+      uri = downcase(to_string(.event.requestURI) ?? "")
+      verb = downcase(to_string(.event.verb) ?? "")
+      resource = ""
+      if is_object(.event.objectRef) {
+        resource = downcase(to_string(.event.objectRef.resource) ?? "")
+      }
+      # Drop healthz/readyz/metrics/livez probes
+      health_probe = starts_with(uri, "/healthz") || starts_with(uri, "/readyz") || starts_with(uri, "/livez") || starts_with(uri, "/metrics")
+      # Drop pure coordination leases (HB noise)
+      lease_noise = (resource == "leases" && (verb == "get" || verb == "update" || verb == "patch"))
+      # Drop TokenReviews / SubjectAccessReviews (voluminous, not audit-relevant at read level)
+      auth_review_noise = (resource == "tokenreviews" || resource == "subjectaccessreviews" || resource == "selfsubjectrulesreviews") && verb == "create"
+      !(health_probe || lease_noise || auth_review_noise)
+    '''
+
+    # Drop kubelet-initiated pod deletes and SA token rotations.
+    # system:node:* deleting pods = scheduler/kubelet lifecycle management (eviction, rolling-update, crash-restart).
+    # system:node:* creating serviceaccounts/token = automatic projected-volume token refresh every ~48 min.
+    # Neither carries security signal; both generate continuous high-volume noise.
+    [transforms.drop_kubelet_noise]
+    type = "filter"
+    inputs = ["drop_noise"]
+    condition = '''
+      user = downcase(to_string(.event.user.username) ?? "")
+      verb = downcase(to_string(.event.verb) ?? "")
+      resource = ""
+      subresource = ""
+      if is_object(.event.objectRef) {
+        resource = downcase(to_string(.event.objectRef.resource) ?? "")
+        subresource = downcase(to_string(.event.objectRef.subresource) ?? "")
+      }
+      kubelet_pod_delete   = starts_with(user, "system:node:") && verb == "delete" && resource == "pods"
+      kubelet_token_rotate = starts_with(user, "system:node:") && verb == "create" && resource == "serviceaccounts" && subresource == "token"
+      !(kubelet_pod_delete || kubelet_token_rotate)
+    '''
+
+    [transforms.only_valid_k8s_audit]
+    type = "filter"
+    inputs = ["drop_kubelet_noise"]
+    condition = '.event != null && .event.requestURI != null && .event.verb != "unknown"'
+
+    [sinks.audit_service]
+    type = "http"
+    inputs = ["only_valid_k8s_audit"]
+    uri = "http://audit-service.ecommerce.svc.cluster.local:8005/ingest/bulk"
+    method = "post"
+    encoding.codec = "json"
+    batch.max_events = 10
+    batch.timeout_secs = 2
+    request.timeout_secs = 10
+    healthcheck.enabled = false
+
+    # ── Loki sink — feeds Grafana dashboards ──────────────────────────────────
+    [sinks.loki]
+    type = "loki"
+    inputs = ["only_valid_k8s_audit"]
+    endpoint = "http://loki.ecommerce.svc.cluster.local:3100"
+    encoding.codec = "json"
+    labels.source_type = "k8s_audit"
+    labels.source = "audit"
+    labels.verb = "{{ event.verb }}"
+    labels.resource = "{{ event.objectRef.resource }}"
+    batch.max_events = 20
+    batch.timeout_secs = 3
+    healthcheck.enabled = false
+
+    # ── OpenSearch sink — feeds OpenSearch Dashboards ──────────────────────────
+    [sinks.opensearch]
+    type = "elasticsearch"
+    inputs = ["only_valid_k8s_audit"]
+    endpoints = ["http://opensearch.ecommerce.svc.cluster.local:9200"]
+    bulk.index = "k8s-audit-%Y.%m.%d"
+    batch.max_events = 20
+    batch.timeout_secs = 3
+    request.timeout_secs = 10
+    healthcheck.enabled = false
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: k8s-audit-forwarder
+  namespace: ecommerce
+  labels:
+    app: k8s-audit-forwarder
+spec:
+  selector:
+    matchLabels:
+      app: k8s-audit-forwarder
+  template:
+    metadata:
+      labels:
+        app: k8s-audit-forwarder
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+        kubernetes.io/os: linux
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+
+      # Vector's HTTP sink fails with "connection refused" if it starts before audit-service is listening.
+      # That leaves the UI empty until someone restarts this DaemonSet. Wait for the Service to answer first.
+      initContainers:
+        - name: wait-for-audit-service
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for http://audit-service.ecommerce.svc.cluster.local:8005/health ..."
+              i=0
+              while [ "$i" -lt 120 ]; do
+                if wget -q -O /dev/null -T 3 http://audit-service.ecommerce.svc.cluster.local:8005/health 2>/dev/null; then
+                  echo "audit-service is reachable."
+                  exit 0
+                fi
+                i=$((i+1))
+                sleep 2
+              done
+              echo "Timeout: audit-service never became reachable. Check: kubectl get pods -n ecommerce -l app=audit-service"
+              exit 1
+
+      containers:
+        - name: vector
+          image: timberio/vector:0.39.0-debian
+          imagePullPolicy: IfNotPresent
+          command: ["vector", "--config", "/etc/vector/vector.toml"]
+          volumeMounts:
+            - name: host-var-log
+              mountPath: /host/var/log
+              readOnly: true
+            - name: vector-config
+              mountPath: /etc/vector/vector.toml
+              subPath: vector.toml
+              readOnly: true
+            - name: vector-data
+              mountPath: /var/lib/vector
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+
+      volumes:
+        - name: host-var-log
+          hostPath:
+            path: /var/log
+            type: Directory
+        - name: vector-config
+          configMap:
+            name: vector-k8s-audit-config
+        - name: vector-data
+          hostPath:
+            path: /var/lib/vector-k8s-audit
+            type: DirectoryOrCreate

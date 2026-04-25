@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opensearch
+  namespace: ecommerce
+  labels:
+    app: opensearch
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opensearch
+  template:
+    metadata:
+      labels:
+        app: opensearch
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: microservices-monitor/node-group
+                    operator: In
+                    values:
+                      - worker1
+      containers:
+      - name: opensearch
+        image: opensearchproject/opensearch:2.11.0
+        ports:
+        - containerPort: 9200
+        env:
+        - name: discovery.type
+          value: "single-node"
+        - name: plugins.security.disabled
+          value: "true"
+        # Heavily restrict OpenSearch RAM for low-memory environments
+        - name: OPENSEARCH_JAVA_OPTS
+          value: "-Xms512m -Xmx512m"
+        - name: DISABLE_BBOX_ML
+          value: "true"
+        - name: DISABLE_INSTALL_DEMO_CONFIG
+          value: "true"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "512Mi"
+          limits:
+            memory: "1400Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch
+  namespace: ecommerce
+spec:
+  type: ClusterIP
+  selector:
+    app: opensearch
+  ports:
+  - port: 9200
+    targetPort: 9200
