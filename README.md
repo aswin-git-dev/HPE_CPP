@@ -1,4 +1,5 @@
-# E-Commerce Microservices & Observability Platform
+# A Smart Security Logging Framework for Microservices using Kubernetes Control Plane, eBPF and Machine Learning
+
 
 A **Cloud-Native Distributed Backend System** simulating an online shopping platform (Swiggy-style), built with FastAPI, Docker, Kubernetes, and MongoDB. This project extends beyond a standard microservices deployment by incorporating a robust **Security, Auditing, and Observability Stack** featuring Falco, Vector, Grafana Cloud, and OpenSearch.
 
@@ -87,12 +88,6 @@ We have streamlined the entire Minikube multi-node deployment via a set of autom
 
 To deploy the entire 3-node cluster, patch the API server for audit logging, apply all manifests, build images, and set up port forwarding:
 
-```cmd
-cd microservices-app\k8s
-run-project.bat
-```
-
-**What the script does:**
 1. Starts a 3-node Minikube cluster (`--nodes=3`).
 2. Patches the `kube-apiserver` to mount hostPath volumes for audit logs.
 3. Applies all Kubernetes YAML manifests, including zero-trust Network Policies, Deployments, and HPA.
@@ -106,7 +101,7 @@ run-project.bat
 
 ## Verification & Usage
 
-Once `run-project.bat` finishes, your browser will open several tabs. You can interact with the system via the following URLs:
+Once your finishes, you need to open browser and check the following urls:
 
 ### UIs & Dashboards
 - **Monitor UI**: [http://127.0.0.1:18015/control-plane/ui](http://127.0.0.1:18015/control-plane/ui)
@@ -133,10 +128,10 @@ kubectl delete namespace demo-audit-ns
 ```
 microservices-app/
 ├── user-service/             # FastAPI Customer Management
-├── product-service/          # Product Catalog Stub
-├── order-service/            # Order Processing Stub
-├── payment-service/          # Payment Handling Stub
-├── notification-service/     # Alerts Stub
+├── product-service/          # Product Catalog 
+├── order-service/            # Order Processing 
+├── payment-service/          # Payment Handling 
+├── notification-service/     # Alerts 
 ├── audit-service/            # Security & Event Monitor (FastAPI + Excel export)
 ├── k8s/
 │   ├── dashboards/           # Grafana Dashboard JSON templates
