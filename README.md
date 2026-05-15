@@ -1,236 +1,125 @@
-#  E-Commerce Microservices Platform
+# A Smart Security Logging Framework for Microservices using Kubernetes Control Plane, eBPF and Machine Learning
 
-A **Cloud-Native Distributed Backend System** simulating an online shopping platform (Swiggy-style), built with FastAPI, Docker, Kubernetes, and MongoDB.
+
+A **Cloud-Native Distributed Backend System** simulating an online shopping platform (Swiggy-style), built with FastAPI, Docker, Kubernetes, and MongoDB. This project extends beyond a standard microservices deployment by incorporating a robust **Security, Auditing, and Observability Stack** featuring Falco, Vector, Grafana Cloud, and OpenSearch.
 
 ---
 
-##  Architecture
+## Architecture
 
-```
-                        ┌─────────────────────────────────────────────┐
-                        │           Kubernetes Cluster (ecommerce ns)  │
+```text
+                        ┌──────────────────────────────────────────────┐
+                        │           Kubernetes Cluster (ecommerce ns)   │
                         │                                              │
-  Client ──► Ingress ──►│   ┌────────────────────────────────────┐    │
-  (NGINX)               │   │         NODE 1  (worker-1)          │    │
-                        │   │  ┌──────────┐  ┌──────────────┐   │    │
-                        │   │  │user-pod-1│  │ product-pod-1│   │    │
-                        │   │  └──────────┘  └──────────────┘   │    │
-                        │   └────────────────────────────────────┘    │
-                        │   ┌────────────────────────────────────┐    │
-                        │   │         NODE 2  (worker-2)          │    │
-                        │   │  ┌──────────┐  ┌──────────────┐   │    │
-                        │   │  │user-pod-2│  │ product-pod-2│   │    │
-                        │   │  └──────────┘  └──────────────┘   │    │
-                        │   └────────────────────────────────────┘    │
-                        │   ┌────────────────────────────────────┐    │
-                        │   │         NODE 3  (worker-3)          │    │
-                        │   │  ┌──────────┐  ┌──────────────┐   │    │
-                        │   │  │user-pod-3│  │  order-pod-1 │   │    │
-                        │   │  └────┬─────┘  └──────────────┘   │    │
-                        │   │       │ MongoDB ClusterIP           │    │
-                        │   │  ┌────▼─────┐                      │    │
-                        │   │  │ mongo-pod│  (DB node)           │    │
-                        │   │  └──────────┘                      │    │
-                        │   └────────────────────────────────────┘    │
-                        └─────────────────────────────────────────────┘
+  Client ──► Ingress ──►│   ┌────────────────────────────────────┐     │
+  (NGINX)               │   │         NODE 1 (Control Plane)      │     │
+                        │   │  ┌────────────┐ ┌───────────────┐  │     │
+                        │   │  │audit-service│ │ falcosidekick │  │     │
+                        │   │  └─────┬──────┘ └───────┬───────┘  │     │
+                        │   │        │                │          │     │
+                        │   └────────▼────────────────▼──────────┘     │
+                        │   ┌────────────────────────────────────┐     │
+                        │   │         NODE 2 & 3 (Workers)        │     │
+                        │   │  ┌──────────┐  ┌──────────────┐    │     │
+                        │   │  │user-pod  │  │ product-pod  │    │     │
+                        │   │  ├──────────┤  ├──────────────┤    │     │
+                        │   │  │order-pod │  │ payment-pod  │    │     │
+                        │   │  └────┬─────┘  └──────┬───────┘    │     │
+                        │   │       │               │            │     │
+                        │   │       ▼               ▼            │     │
+                        │   │  ┌──────────┐ ┌───────────────┐    │     │
+                        │   │  │ mongo-pod│ │ vector (logs) │    │     │
+                        │   │  └──────────┘ └───────────────┘    │     │
+                        │   └────────────────────────────────────┘     │
+                        │                                              │
+                        │   ┌────────────────────────────────────┐     │
+                        │   │         EXTERNAL SERVICES           │     │
+                        │   │  ┌──────────┐  ┌──────────────┐    │     │
+                        │   │  │ OpenSearch│  │ Grafana Cloud│    │     │
+                        │   │  │ (Audit DB)│  │ (Loki Logs)  │    │     │
+                        │   │  └──────────┘  └──────────────┘    │     │
+                        │   └────────────────────────────────────┘     │
+                        └──────────────────────────────────────────────┘
 ```
 
 ---
 
-## Services
+## Core Services
 
-| Service               | Port | Description              |
-|-----------------------|------|--------------------------|
-| **user-service**      | 8000 | Customer Management      |
-| **product-service**   | 8001 | Product Catalog          |
-| **order-service**     | 8002 | Order Processing         |
-| **payment-service**   | 8003 | Payment Handling         |
-| **notification-service** | 8004 | Email/SMS Alerts         |
+| Service               | Port | Description |
+|-----------------------|------|-------------|
+| **user-service**      | 8000 | Customer Management & HTML UI |
+| **product-service**   | 8001 | Product Catalog |
+| **order-service**     | 8002 | Order Processing |
+| **payment-service**   | 8003 | Payment Handling |
+| **notification-service** | 8004 | Email/SMS Alerts |
+| **audit-service**     | 8005 | Central ingestion for K8s Audit Logs and Falco security alerts |
 
 ---
 
-## Quick Start — Local (Docker Compose)
+## Observability & Security Stack
+
+This platform integrates an advanced observability pipeline to ensure zero-trust security and complete audit trails:
+
+- **Falco**: DaemonSet running on kernel level using eBPF to detect suspicious container behavior, filesystem access, and shell executions. Alerts are forwarded via `falcosidekick`.
+- **Vector**: DaemonSet collecting Kubernetes API server events, logs, and routing them based on RBAC to the audit service.
+- **Audit-Service**: A FastAPI backend that processes incoming telemetry, classifies it, and exports it via CSV/Excel. It serves as the bridge to log aggregators.
+- **Grafana Cloud (Loki)**: Secure remote log storage and dynamic dashboards.
+- **OpenSearch**: Deployed within the cluster with automated Index State Management (ISM) for TTL-based log retention.
+
+---
+
+## Kubernetes Deployment (Automated Setup)
+
+We have streamlined the entire Minikube multi-node deployment via a set of automation scripts. 
 
 ### Prerequisites
-- Docker Desktop installed and running
+1. Docker Desktop installed and running.
+2. `kubectl`, `minikube`, and `helm` installed.
+3. **Environment Variables**: Create an `.env` file in `microservices-app/k8s/` and `microservices-app/audit-service/` containing your Grafana Cloud credentials:
+   ```env
+   LOKI_PUSH_URL=https://logs-prod-xxx.grafana.net/loki/api/v1/push
+   LOKI_URL=https://logs-prod-xxx.grafana.net
+   LOKI_INSTANCE_ID=your_id
+   GRAFANA_CLOUD_TOKEN=glc_your_secure_token
+   ```
 
-```bash
-cd d:\AK_Repo\HPE_CPP\microservices-app
+### Quick Start (Windows)
 
-# Build & run all services
-docker-compose up --build
+To deploy the entire 3-node cluster, patch the API server for audit logging, apply all manifests, build images, and set up port forwarding:
 
-# Run in background
-docker-compose up --build -d
-```
+1. Starts a 3-node Minikube cluster (`--nodes=3`).
+2. Patches the `kube-apiserver` to mount hostPath volumes for audit logs.
+3. Applies all Kubernetes YAML manifests, including zero-trust Network Policies, Deployments, and HPA.
+4. Builds Docker images directly into Minikube and distributes them across nodes.
+5. Installs **Falco** via Helm (parsing the `.env` file for Grafana credentials).
+6. Automatically sets up `port-forward` for all services and opens the UI in your browser.
 
-### Access the Application
-
-| URL | Description |
-|-----|-------------|
-| `http://localhost:8000` | User Service Dashboard (HTML UI) |
-| `http://localhost:8000/docs` | Swagger API Docs |
-| `http://localhost:8000/redoc` | ReDoc API Docs |
-| `http://localhost:8000/health` | Health Check |
-| `http://localhost:8001` | Product Service (stub) |
-| `http://localhost:8002` | Order Service (stub) |
-| `http://localhost:8003` | Payment Service (stub) |
-| `http://localhost:8004` | Notification Service (stub) |
+*Note: You can skip certain steps on subsequent runs by setting environment variables in your terminal before running the script (e.g., `set SKIP_IMAGE_BUILD=1`, `set SKIP_FALCO=1`).*
 
 ---
 
-## Kubernetes Deployment (Multi-Node)
+## Verification & Usage
 
-### Prerequisites
-- Kubernetes cluster with ≥ 3 worker nodes (kubeadm / GKE / EKS / AKS)
-- `kubectl` configured
-- NGINX Ingress Controller
-- metrics-server (for HPA)
+Once your finishes, you need to open browser and check the following urls:
 
-### Step 1 — Install Prerequisites
+### UIs & Dashboards
+- **Monitor UI**: [http://127.0.0.1:18015/control-plane/ui](http://127.0.0.1:18015/control-plane/ui)
+- **Architecture View**: [http://127.0.0.1:18015/control-plane/architecture/ui](http://127.0.0.1:18015/control-plane/architecture/ui)
+- **Grafana Cloud**: [https://securelogger.grafana.net](https://securelogger.grafana.net)
+- **OpenSearch Dashboards**: [http://127.0.0.1:5601](http://127.0.0.1:5601)
 
-```bash
-# NGINX Ingress Controller
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.0/deploy/static/provider/cloud/deploy.yaml
+### Triggering Security Alerts (Test)
 
-# metrics-server (for HPA)
-kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+To verify that the audit and security pipelines are working, trigger a test event in a new terminal:
+
+```cmd
+kubectl create namespace demo-audit-ns
+kubectl -n ecommerce create secret generic demo-secret --from-literal=pw=test123
+kubectl -n ecommerce exec deployment/audit-service -- python -c "print('exec-test')"
+kubectl delete namespace demo-audit-ns
 ```
-
-### Step 2 — Label Worker Nodes
-
-```bash
-# List your nodes
-kubectl get nodes
-
-# Label each worker node
-kubectl label nodes <worker-node-1> node-role.kubernetes.io/worker=worker
-kubectl label nodes <worker-node-2> node-role.kubernetes.io/worker=worker
-kubectl label nodes <worker-node-3> node-role.kubernetes.io/worker=worker
-
-# Create MongoDB data directory on the DB node
-# SSH into the node that will host MongoDB:
-# sudo mkdir -p /data/mongodb/userdb
-```
-
-### Step 3 — Build & Push Docker Images
-
-```bash
-# Build images
-docker build -t user-service:latest       ./user-service
-docker build -t product-service:latest    ./product-service
-docker build -t order-service:latest      ./order-service
-docker build -t payment-service:latest    ./payment-service
-docker build -t notification-service:latest ./notification-service
-
-# For production, push to registry:
-# docker tag user-service:latest your-registry/user-service:latest
-# docker push your-registry/user-service:latest
-```
-
-### Step 4 — Deploy to Kubernetes
-
-```bash
-# 1. Create namespace
-kubectl apply -f k8s/namespace.yaml
-
-# 2. Deploy MongoDB (DB + PV + PVC)
-kubectl apply -f db/mongo-pv.yaml
-kubectl apply -f db/mongo-deployment.yaml
-kubectl apply -f k8s/mongo-service.yaml
-
-# 3. Deploy all services
-kubectl apply -f k8s/user-deployment.yaml
-kubectl apply -f k8s/user-service.yaml
-kubectl apply -f k8s/product-deployment.yaml
-kubectl apply -f k8s/product-service.yaml
-kubectl apply -f k8s/order-deployment.yaml
-kubectl apply -f k8s/order-service.yaml
-kubectl apply -f k8s/payment-deployment.yaml
-kubectl apply -f k8s/payment-service.yaml
-kubectl apply -f k8s/notification-deployment.yaml
-kubectl apply -f k8s/notification-service.yaml
-
-# 4. Apply HA & scaling policies
-kubectl apply -f k8s/pdb.yaml
-kubectl apply -f k8s/hpa.yaml
-
-# 5. Apply network policy & ingress
-kubectl apply -f k8s/network-policy.yaml
-kubectl apply -f k8s/ingress.yaml
-```
-
-### Step 5 — Verify
-
-```bash
-# Check all pods across nodes
-kubectl get pods -n ecommerce -o wide
-
-# Check services
-kubectl get svc -n ecommerce
-
-# Check HPA
-kubectl get hpa -n ecommerce
-
-# Check PDB
-kubectl get pdb -n ecommerce
-
-# Watch pods spread across nodes
-kubectl get pods -n ecommerce -o wide --watch
-```
-
----
-
-##  Multi-Node Features
-
-| Feature | Config |
-|---------|--------|
-| **Pod Anti-Affinity** | `preferredDuringSchedulingIgnoredDuringExecution` — spreads pods across nodes |
-| **Topology Spread** | `maxSkew: 1` on `kubernetes.io/hostname` — even distribution |
-| **HPA** | user-service: 3→10 pods at CPU≥70% / Memory≥80% |
-| **PDB** | `minAvailable: 1` for all services — safe during node drain |
-| **Zero-downtime updates** | `maxSurge: 1, maxUnavailable: 0` rolling update |
-| **Network Policy** | Default-deny + explicit allow rules (zero-trust) |
-| **Resource Requests/Limits** | Proper CPU/memory for scheduler bin-packing |
-
----
-
-## User Service API Reference
-
-### REST Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/` | HTML Dashboard |
-| `POST` | `/users/` | Create a new user |
-| `GET` | `/users/` | List all users |
-| `GET` | `/users/{id}` | Get user by ID |
-| `PUT` | `/users/{id}` | Update user |
-| `DELETE` | `/users/{id}` | Delete user |
-| `GET` | `/health` | Health check |
-
-### Example API Usage
-
-```bash
-# Create user
-curl -X POST http://localhost:8000/users/ \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Aswin Kumar","email":"aswin@example.com","phone":"9876543210","role":"customer"}'
-
-# List all users
-curl http://localhost:8000/users/
-
-# Get specific user
-curl http://localhost:8000/users/<user_id>
-
-# Update user
-curl -X PUT http://localhost:8000/users/<user_id> \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Aswin K"}'
-
-# Delete user
-curl -X DELETE http://localhost:8000/users/<user_id>
-```
+*You will immediately see these actions reflected in the Monitor UI, Grafana Loki, and OpenSearch.*
 
 ---
 
@@ -238,41 +127,36 @@ curl -X DELETE http://localhost:8000/users/<user_id>
 
 ```
 microservices-app/
-├── user-service/             # Full FastAPI implementation
-│   ├── main.py               #    CRUD API + HTML dashboard
-│   ├── requirements.txt
-│   └── Dockerfile            #    Multi-stage, non-root user
-├── product-service/          # Stub (folder only)
-├── order-service/            # Stub (folder only)
-├── payment-service/          # Stub (folder only)
-├── notification-service/     # Stub (folder only)
-├── db/
-│   ├── mongo-deployment.yaml #    MongoDB Deployment + resource limits
-│   └── mongo-pv.yaml         #    PersistentVolume + PVC (5Gi)
+├── user-service/             # FastAPI Customer Management
+├── product-service/          # Product Catalog 
+├── order-service/            # Order Processing 
+├── payment-service/          # Payment Handling 
+├── notification-service/     # Alerts 
+├── audit-service/            # Security & Event Monitor (FastAPI + Excel export)
 ├── k8s/
-│   ├── namespace.yaml        #    ecommerce namespace
-│   ├── user-deployment.yaml  #    3 replicas, anti-affinity, topology spread
-│   ├── *-deployment.yaml     #    2 replicas each, anti-affinity
-│   ├── *-service.yaml        #    ClusterIP services
-│   ├── mongo-service.yaml    #    ClusterIP + Headless
-│   ├── pdb.yaml              #    PodDisruptionBudgets for all services
-│   ├── hpa.yaml              #    HPA: 3→10 pods at CPU/Mem threshold
-│   ├── network-policy.yaml   #    Zero-trust network policy
-│   └── ingress.yaml          #    NGINX Ingress with path routing
-├── docker-compose.yaml       #    Local dev setup
+│   ├── dashboards/           # Grafana Dashboard JSON templates
+│   ├── namespace.yaml        # ecommerce namespace
+│   ├── *-deployment.yaml     # Microservices deployments (anti-affinity applied)
+│   ├── vector.yaml           # Vector DaemonSet for logs forwarding
+│   ├── falco-values.yaml     # Helm values for Falco & Falcosidekick
+│   ├── opensearch-ism-job.yaml # TTL policies for audit databases
+│   ├── network-policy.yaml   # Zero-trust network rules
+│   ├── run-project.bat       # Master deployment automation script
+│   └── install-falco.bat     # Helm install automation for Falco
 └── README.md
 ```
 
 ---
 
-##  Tech Stack
+## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| **Framework** | FastAPI 0.110 |
-| **Runtime** | Python 3.11, Uvicorn |
-| **Database** | MongoDB 6.0 (Motor async driver) |
-| **Containerisation** | Docker (multi-stage builds) |
-| **Orchestration** | Kubernetes (Deployments, Services, HPA, PDB) |
+| **Microservices Framework** | FastAPI 0.110, Python 3.11 |
+| **Database** | MongoDB 6.0 |
+| **Containerisation** | Docker |
+| **Orchestration** | Kubernetes (Minikube 3-Node) |
+| **Security Runtime** | Falco (eBPF), Falcosidekick |
+| **Logging Pipeline** | Vector |
+| **Log Aggregation** | Grafana Cloud (Loki), OpenSearch |
 | **Networking** | NGINX Ingress, NetworkPolicy |
-| **Local Dev** | Docker Compose |
