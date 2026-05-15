@@ -99,56 +99,13 @@ spec:
           port: 9200
 
 ---
-# 3b. Allow Loki ingress from all project namespaces + falco
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-loki
-  namespace: ecommerce
-spec:
-  podSelector:
-    matchLabels:
-      app: loki
-  policyTypes:
-    - Ingress
-  ingress:
-    - from:
-        - podSelector: {}    # Within ecommerce (vector, grafana)
-      ports:
-        - protocol: TCP
-          port: 3100
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              project: ecommerce-platform   # falcosidekick in falco namespace
-      ports:
-        - protocol: TCP
-          port: 3100
+# 3b. Loki NetworkPolicy — REMOVED (using Grafana Cloud Loki)
+# The local Loki pod is no longer deployed. Logs are pushed directly
+# to https://logs-prod-028.grafana.net by Vector and FalcoSidekick.
 
----
-# 3c. Allow Grafana ingress (UI access via port-forward)
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-grafana
-  namespace: ecommerce
-spec:
-  podSelector:
-    matchLabels:
-      app: grafana
-  policyTypes:
-    - Ingress
-  ingress:
-    - from:
-        - podSelector: {}
-      ports:
-        - protocol: TCP
-          port: 3000
-    - from:
-        - namespaceSelector: {}   # port-forward from any namespace
-      ports:
-        - protocol: TCP
-          port: 3000
+# 3c. Grafana NetworkPolicy — REMOVED (using Grafana Cloud)
+# The local Grafana pod is no longer deployed. Dashboards are at
+# https://securelogger.grafana.net
 
 ---
 # 4. Allow audit-service ingress from all microservice namespaces + ecommerce

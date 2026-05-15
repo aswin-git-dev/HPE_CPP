@@ -14,6 +14,7 @@ spec:
       labels:
         app: log-forwarder
     spec:
+      serviceAccountName: vector
       # Runs on ALL nodes (control-plane + WorkerNode1 + WorkerNode2)
       # so pod logs from every node reach the audit-service.
       tolerations:
@@ -34,6 +35,21 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
+        - name: GRAFANA_CLOUD_LOKI_URL
+          valueFrom:
+            secretKeyRef:
+              name: grafana-cloud-loki
+              key: LOKI_URL
+        - name: GRAFANA_CLOUD_LOKI_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: grafana-cloud-loki
+              key: LOKI_USERNAME
+        - name: GRAFANA_CLOUD_LOKI_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: grafana-cloud-loki
+              key: LOKI_PASSWORD
         volumeMounts:
         - name: varlog
           mountPath: /var/log
@@ -107,3 +123,39 @@ data:
     batch.max_events = 10
     batch.timeout_secs = 2
     healthcheck.enabled = false
+
+    # ── Falco Cloud Forwarding ───────────────────────────────────────────────
+    [transforms.falco_only]
+    type = "filter"
+    inputs = ["pod_logs"]
+    # Capture stdout from falco pods, but ignore falcosidekick
+    condition = 'starts_with(to_string(.kubernetes.pod_name) ?? "", "falco-") && !starts_with(to_string(.kubernetes.pod_name) ?? "", "falco-falcosidekick")'
+
+    [transforms.falco_parse]
+    type = "remap"
+    inputs = ["falco_only"]
+    source = '''
+      msg = to_string(.message) ?? ""
+      parsed, err = parse_json(msg)
+      if err == null && is_object(parsed) {
+        . = parsed
+      }
+      .source = "falco"
+      .source_type = "falco"
+      # Grafana Cloud AI dashboard expects rule as a top-level field or in json payload
+    '''
+
+    [sinks.falco_loki]
+    type = "loki"
+    inputs = ["falco_parse"]
+    endpoint = "${GRAFANA_CLOUD_LOKI_URL}"
+    encoding.codec = "json"
+    labels.source = "falco"
+    labels.source_type = "falco"
+    batch.max_events = 20
+    batch.timeout_secs = 3
+    healthcheck.enabled = false
+    auth.strategy = "basic"
+    auth.user = "${GRAFANA_CLOUD_LOKI_USERNAME}"
+    auth.password = "${GRAFANA_CLOUD_LOKI_PASSWORD}"
+    tenant_id = "${GRAFANA_CLOUD_LOKI_USERNAME}"

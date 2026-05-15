@@ -170,11 +170,11 @@ data:
     request.timeout_secs = 10
     healthcheck.enabled = false
 
-    # ── Loki sink — feeds Grafana dashboards ──────────────────────────────────
+    # ── Loki sink — feeds Grafana Cloud dashboards ────────────────────────────
     [sinks.loki]
     type = "loki"
     inputs = ["only_valid_k8s_audit"]
-    endpoint = "http://loki.ecommerce.svc.cluster.local:3100"
+    endpoint = "${GRAFANA_CLOUD_LOKI_URL}"
     encoding.codec = "json"
     labels.source_type = "k8s_audit"
     labels.source = "audit"
@@ -183,6 +183,10 @@ data:
     batch.max_events = 20
     batch.timeout_secs = 3
     healthcheck.enabled = false
+    auth.strategy = "basic"
+    auth.user = "${GRAFANA_CLOUD_LOKI_USERNAME}"
+    auth.password = "${GRAFANA_CLOUD_LOKI_PASSWORD}"
+    tenant_id = "${GRAFANA_CLOUD_LOKI_USERNAME}"
 
     # ── OpenSearch sink — feeds OpenSearch Dashboards ──────────────────────────
     [sinks.opensearch]
@@ -250,6 +254,22 @@ spec:
           image: timberio/vector:0.39.0-debian
           imagePullPolicy: IfNotPresent
           command: ["vector", "--config", "/etc/vector/vector.toml"]
+          env:
+            - name: GRAFANA_CLOUD_LOKI_URL
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-cloud-loki
+                  key: LOKI_URL
+            - name: GRAFANA_CLOUD_LOKI_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-cloud-loki
+                  key: LOKI_USERNAME
+            - name: GRAFANA_CLOUD_LOKI_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-cloud-loki
+                  key: LOKI_PASSWORD
           volumeMounts:
             - name: host-var-log
               mountPath: /host/var/log

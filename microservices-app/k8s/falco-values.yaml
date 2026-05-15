@@ -23,9 +23,13 @@ falcosidekick:
       address: "http://audit-service.ecommerce.svc.cluster.local:8005/ingest/falco"
       method: "POST"
       checkcert: false
-    # ── Loki output — feeds Grafana dashboards ──────────────────────────────
+    # ── Loki output — feeds Grafana Cloud dashboards ────────────────────────
     loki:
-      hostport: "http://loki.ecommerce.svc.cluster.local:3100"
+      hostport: "https://logs-prod-028.grafana.net"
+      user: "1601232"
+      apikey: "<YOUR_GRAFANA_CLOUD_API_TOKEN>"
+      tenant: "1601232"
+      format: "json"
       customheaders: ""
       extralabels: "source_type:falco,source:falco"
     # ── Elasticsearch output — feeds OpenSearch Dashboards ──────────────────

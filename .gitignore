@@ -1,0 +1,19 @@
+# ─── Secrets / Credentials ──────────────────────────────────────────────────
+.env
+*.env
+microservices-app/k8s/.env
+microservices-app/k8s/grafana-cloud-secret.yaml
+
+# ─── IDE / Editor ───────────────────────────────────────────────────────────
+.cursor/
+.gemini/
+.vscode/
+.idea/
+
+# ─── OS ─────────────────────────────────────────────────────────────────────
+Thumbs.db
+.DS_Store
+
+# ─── Minikube logs (large, machine-specific) ────────────────────────────────
+microservices-app/k8s/minikube-logs.txt
+microservices-app/k8s/minikube_logs.txt

@@ -1,0 +1,120 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Falco Alerts Over Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "loki", "uid": "grafanacloud-logs" },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({rule!=\"\"} [$__interval])) by (priority)",
+          "legendFormat": "{{priority}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } }
+      }
+    },
+    {
+      "title": "Falco Alerts by Priority",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "datasource": { "type": "loki", "uid": "grafanacloud-logs" },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({rule!=\"\"} [$__range])) by (priority)",
+          "legendFormat": "{{priority}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Falco Alerts by Rule",
+      "type": "barchart",
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 8 },
+      "datasource": { "type": "loki", "uid": "grafanacloud-logs" },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({rule!=\"\"} [$__range])) by (rule)",
+          "legendFormat": "{{rule}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Critical & Warning Alerts",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "loki", "uid": "grafanacloud-logs" },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({rule!=\"\" , priority=~\"Critical|Warning|Emergency|Alert\"} [$__range]))",
+          "legendFormat": "Critical+Warning",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Informational Alerts",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "loki", "uid": "grafanacloud-logs" },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({rule!=\"\" , priority=~\"Notice|Info|Informational|Debug\"} [$__range]))",
+          "legendFormat": "Info+Notice",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Recent Falco Alerts (Live Tail)",
+      "type": "logs",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 20 },
+      "datasource": { "type": "loki", "uid": "grafanacloud-logs" },
+      "targets": [
+        {
+          "expr": "{rule!=\"\"}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["falco", "runtime", "security", "kernel"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Falco Runtime Security",
+  "uid": "falco-runtime-security",
+  "version": 1
+}
