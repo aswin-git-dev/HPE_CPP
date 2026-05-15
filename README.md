@@ -9,17 +9,17 @@ A **Cloud-Native Distributed Backend System** simulating an online shopping plat
 
 ```text
                         ┌──────────────────────────────────────────────┐
-                        │           Kubernetes Cluster (ecommerce ns)   │
+                        │           Kubernetes Cluster (ecommerce ns)  │
                         │                                              │
   Client ──► Ingress ──►│   ┌────────────────────────────────────┐     │
-  (NGINX)               │   │         NODE 1 (Control Plane)      │     │
+  (NGINX)               │   │         NODE 1 (Control Plane)     │     │
                         │   │  ┌────────────┐ ┌───────────────┐  │     │
-                        │   │  │audit-service│ │ falcosidekick │  │     │
+                        │   │  │audit-service│ │ falcosidekick│  │     │
                         │   │  └─────┬──────┘ └───────┬───────┘  │     │
                         │   │        │                │          │     │
                         │   └────────▼────────────────▼──────────┘     │
                         │   ┌────────────────────────────────────┐     │
-                        │   │         NODE 2 & 3 (Workers)        │     │
+                        │   │         NODE 2 & 3 (Workers)       │     │
                         │   │  ┌──────────┐  ┌──────────────┐    │     │
                         │   │  │user-pod  │  │ product-pod  │    │     │
                         │   │  ├──────────┤  ├──────────────┤    │     │
@@ -33,10 +33,10 @@ A **Cloud-Native Distributed Backend System** simulating an online shopping plat
                         │   └────────────────────────────────────┘     │
                         │                                              │
                         │   ┌────────────────────────────────────┐     │
-                        │   │         EXTERNAL SERVICES           │     │
+                        │   │         EXTERNAL SERVICES          │     │
                         │   │  ┌──────────┐  ┌──────────────┐    │     │
-                        │   │  │ OpenSearch│  │ Grafana Cloud│    │     │
-                        │   │  │ (Audit DB)│  │ (Loki Logs)  │    │     │
+                        │   │  │OpenSearch│  │ Grafana Cloud│    │     │
+                        │   │  │(Audit DB)│  │ (Loki Logs)  │    │     │
                         │   │  └──────────┘  └──────────────┘    │     │
                         │   └────────────────────────────────────┘     │
                         └──────────────────────────────────────────────┘
