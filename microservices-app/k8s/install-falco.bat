@@ -75,8 +75,19 @@ echo [Falco] Helm repo...
 "%HELM_CMD%" repo update
 if errorlevel 1 goto :fail
 
+echo [Falco] Loading .env for GRAFANA_CLOUD_TOKEN...
+if exist "%~dp0.env" (
+  for /f "usebackq eol=# tokens=1,2 delims==" %%A in ("%~dp0.env") do (
+    if "%%A"=="GRAFANA_CLOUD_TOKEN" set "GRAFANA_CLOUD_TOKEN=%%B"
+  )
+)
+
+if not defined GRAFANA_CLOUD_TOKEN (
+  echo [WARNING] GRAFANA_CLOUD_TOKEN not found in .env. Falco Loki output may fail to authenticate.
+)
+
 echo [Falco] Installing/upgrading chart (may take several minutes)...
-"%HELM_CMD%" upgrade --install falco falcosecurity/falco -n falco -f "%~dp0falco-values.yaml" --create-namespace --wait --timeout 15m
+"%HELM_CMD%" upgrade --install falco falcosecurity/falco -n falco -f "%~dp0falco-values.yaml" --set falcosidekick.config.loki.apikey="%GRAFANA_CLOUD_TOKEN%" --create-namespace --wait --timeout 15m
 if errorlevel 1 goto :fail
 
 echo.
