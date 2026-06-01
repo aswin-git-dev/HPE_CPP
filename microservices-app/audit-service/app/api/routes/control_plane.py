@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
-from app.control_plane_ui_build import build_control_plane_ui_html
+from app.control_plane_ui_build import build_control_plane_ui_html, inject_site_favicon
 
 router = APIRouter(prefix="/control-plane", tags=["control-plane"])
+
+_ICON_DIR = Path(__file__).resolve().parents[2] / "static" / "icons"
 
 
 def _slug_falco_rule(name: str) -> str:
@@ -241,6 +244,16 @@ def recent_events_monitor(request: Request, limit: int = 100):
     return {"events": payloads}
 
 
+@router.get("/favicon.svg", include_in_schema=False)
+def site_favicon():
+    return FileResponse(_ICON_DIR / "site.svg", media_type="image/svg+xml")
+
+
+@router.get("/architecture/favicon.svg", include_in_schema=False)
+def architecture_favicon():
+    return FileResponse(_ICON_DIR / "site.svg", media_type="image/svg+xml")
+
+
 @router.get("/ui")
 def control_plane_ui():
     """Return the same document as ``k8s/sample-control-plane-ui.html`` (minus demo/mock script): table ``tbl-pods``, ``colgroup``, ``tbody#podsBody``."""
@@ -257,7 +270,10 @@ def architecture_data(request: Request):
 
 @router.get("/architecture/ui", response_class=HTMLResponse)
 def architecture_ui_page():
-    return _ARCHITECTURE_HTML
+    return HTMLResponse(
+        content=inject_site_favicon(_ARCHITECTURE_HTML),
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
 
 
 _ARCHITECTURE_HTML = """

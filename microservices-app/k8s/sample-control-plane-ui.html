@@ -266,16 +266,14 @@
     <div class="tbl-wrap tbl-wrap--audit">
       <table class="tbl-data tbl-audit">
         <colgroup>
-          <col style="width:17%"/><col style="width:22%"/><col style="width:15%"/><col style="width:12%"/><col style="width:18%"/><col style="width:16%"/>
+          <col style="width:22%"/><col style="width:38%"/><col style="width:22%"/><col style="width:18%"/>
         </colgroup>
         <thead>
           <tr>
             <th scope="col">Time (IST)</th>
-            <th scope="col">Resource · Verb</th>
             <th scope="col">User</th>
-            <th scope="col">Stage</th>
-            <th scope="col">Classification</th>
-            <th scope="col">Result</th>
+            <th scope="col">Resource</th>
+            <th scope="col">Action</th>
           </tr>
         </thead>
         <tbody id="eventsBody"></tbody>
@@ -398,6 +396,24 @@
     return String(cls).replace(/_/g,' ');
   }
 
+  function auditRowFields(e){
+    const src=e.data?.source||{}, obj=e.data?.object||{};
+    let resource=obj.objtype||'';
+    let verb=(src.requestMethod||'').toLowerCase();
+    if(!resource||!verb){
+      const parts=(e.type||'').split('.');
+      if(parts.length>=2){
+        if(!verb) verb=parts[parts.length-1]||'';
+        if(!resource) resource=parts[parts.length-2]||'';
+      }
+    }
+    return {
+      user: src.subject||src.user||'—',
+      resource: resource||'—',
+      verb: verb||'—',
+    };
+  }
+
   function getFilters(){
     const pick=id=>{ const v=document.getElementById(id)?.value; return (v&&v!=='')?v:'all'; };
     return {
@@ -422,8 +438,10 @@
         else if(cls!==f.classification) return false;
       }
       if(f.q){
+        const row=auditRowFields(e);
         const hay=[e.type,src.subject,src.user,src.requestMethod,src.requestUrl,
-          obj.objowner,obj.objtype,obj.objname,obj.objchanges,net.classification].join(' ').toLowerCase();
+          obj.objowner,obj.objtype,obj.objname,obj.objchanges,net.classification,
+          row.resource,row.verb,row.user].join(' ').toLowerCase();
         if(!hay.includes(f.q)) return false;
       }
       return true;
@@ -512,24 +530,17 @@
     body.innerHTML='';
     let failures=0, unauth=0;
     visibleEvents.forEach((e,i)=>{
-      const src=e.data?.source||{}, net=e.data?.network||{};
+      const net=e.data?.network||{};
       const res=(net.apiCallResult||'').toLowerCase();
       const cls=net.classification||'';
       if(res!=='success') failures++;
       if(cls==='unauthorized_access') unauth++;
-      const resCls=res==='success'?'ok':'err';
-      const resLabel=net.apiCallResult||'—';
-      const parts=(e.type||'').split('.');
-      const shortType=parts.length>=2 ? parts.slice(-2).join(' · ') : (e.type||'—');
-      const stage=net.stage||'—';
-      const clsDisplay=cls?`<span class="${clsCss(cls)}">${esc(formatClassificationLabel(cls))}</span>`:'<span style="color:#aaa">—</span>';
+      const row=auditRowFields(e);
       body.innerHTML+=`<tr class="clickable" onclick="showEvent(${i},this)">
         <td>${esc(formatIst(e.time))}</td>
-        <td class="mono">${esc(shortType)}</td>
-        <td>${esc(src.subject||src.user||'—')}</td>
-        <td><span class="pill tag">${esc(stage)}</span></td>
-        <td>${clsDisplay}</td>
-        <td><span class="pill ${resCls}">${esc(resLabel)}</span></td>
+        <td>${esc(row.user)}</td>
+        <td class="mono">${esc(row.resource)}</td>
+        <td class="mono">${esc(row.verb)}</td>
       </tr>`;
     });
     document.getElementById('stEvents').textContent=currentEvents.length;

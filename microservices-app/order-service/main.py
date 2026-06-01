@@ -6,6 +6,8 @@ from bson import ObjectId
 import os
 from typing import List
 
+from site_favicon import site_favicon_link_tag
+
 app = FastAPI(
     title="Order Service",
     description="Order Processing Microservice — E-Commerce Platform",
@@ -117,6 +119,7 @@ def dashboard():
     <html>
     <head>
     <title>Order Dashboard</title>
+    {site_favicon_link_tag()}
     {HTML_STYLE}
     </head>
 

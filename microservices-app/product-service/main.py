@@ -9,6 +9,7 @@ from bson.errors import InvalidId
 import motor.motor_asyncio
 import os
 
+from site_favicon import site_favicon_link_tag
 
 # App Setup
 app = FastAPI(
@@ -242,6 +243,7 @@ def render_page(content: str, alert: str = "", alert_type: str = "success") -> s
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Product Service Dashboard</title>
+  {site_favicon_link_tag()}
   {HTML_STYLE}
 </head>
 <body>

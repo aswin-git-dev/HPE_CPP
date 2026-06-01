@@ -2,6 +2,7 @@
 .env
 *.env
 microservices-app/k8s/.env
+microservices-app/k8s/env
 microservices-app/k8s/grafana-cloud-secret.yaml
 
 # ─── IDE / Editor ───────────────────────────────────────────────────────────

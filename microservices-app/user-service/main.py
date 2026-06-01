@@ -14,6 +14,8 @@ from bson.errors import InvalidId
 import motor.motor_asyncio
 import os
 
+from site_favicon import site_favicon_link_tag
+
 # ──────────────────────────────────────────────
 # App Setup
 # ──────────────────────────────────────────────
@@ -370,6 +372,7 @@ def render_page(content: str, msg: str = "", msg_type: str = "success") -> str:
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>User Service — E-Commerce Platform</title>
+  {site_favicon_link_tag()}
   {HTML_STYLE}
 </head>
 <body>

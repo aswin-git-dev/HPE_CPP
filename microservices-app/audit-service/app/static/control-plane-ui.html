@@ -4,7 +4,8 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>microservices-Monitor</title>
-<style>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%20role%3D%22img%22%20aria-label%3D%22HPE%20microservices%20monitor%22%3E%0A%20%20%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%227%22%20fill%3D%22%233C5A3E%22%2F%3E%0A%20%20%3Cpath%20fill%3D%22none%22%20stroke%3D%22%23FAF9F6%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20d%3D%22M10%2010h12a2%202%200%200%201%202%202v12a2%202%200%200%201-2%202H10a2%202%200%200%201-2-2V12a2%202%200%200%201%202-2z%22%2F%3E%0A%20%20%3Crect%20x%3D%2212.5%22%20y%3D%227.5%22%20width%3D%227%22%20height%3D%223.5%22%20rx%3D%221%22%20fill%3D%22%23FAF9F6%22%2F%3E%0A%20%20%3Cline%20x1%3D%2211.5%22%20y1%3D%2216.5%22%20x2%3D%2220.5%22%20y2%3D%2216.5%22%20stroke%3D%22%23FAF9F6%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%2F%3E%0A%20%20%3Cline%20x1%3D%2211.5%22%20y1%3D%2220%22%20x2%3D%2218%22%20y2%3D%2220%22%20stroke%3D%22%23FAF9F6%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%2F%3E%0A%20%20%3Cline%20x1%3D%2211.5%22%20y1%3D%2213.5%22%20x2%3D%2214.5%22%20y2%3D%2213.5%22%20stroke%3D%22%23FAF9F6%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%2F%3E%0A%3C%2Fsvg%3E" type="image/svg+xml" sizes="any"/>
+  <style>
     :root {
       --green:   #3C5A3E;
       --green2:  #2d4a30;
@@ -258,16 +259,14 @@
     <div class="tbl-wrap tbl-wrap--audit">
       <table class="tbl-data tbl-audit">
         <colgroup>
-          <col style="width:17%"/><col style="width:22%"/><col style="width:15%"/><col style="width:12%"/><col style="width:18%"/><col style="width:16%"/>
+          <col style="width:22%"/><col style="width:38%"/><col style="width:22%"/><col style="width:18%"/>
         </colgroup>
         <thead>
           <tr>
             <th scope="col">Time (IST)</th>
-            <th scope="col">Resource · Verb</th>
             <th scope="col">User</th>
-            <th scope="col">Stage</th>
-            <th scope="col">Classification</th>
-            <th scope="col">Result</th>
+            <th scope="col">Resource</th>
+            <th scope="col">Action</th>
           </tr>
         </thead>
         <tbody id="eventsBody"></tbody>
@@ -352,6 +351,24 @@
     return String(cls).replace(/_/g,' ');
   }
 
+  function auditRowFields(e){
+    const src=e.data?.source||{}, obj=e.data?.object||{};
+    let resource=obj.objtype||'';
+    let verb=(src.requestMethod||'').toLowerCase();
+    if(!resource||!verb){
+      const parts=(e.type||'').split('.');
+      if(parts.length>=2){
+        if(!verb) verb=parts[parts.length-1]||'';
+        if(!resource) resource=parts[parts.length-2]||'';
+      }
+    }
+    return {
+      user: src.subject||src.user||'—',
+      resource: resource||'—',
+      verb: verb||'—',
+    };
+  }
+
   function getFilters(){
     const pick=id=>{ const v=document.getElementById(id)?.value; return (v&&v!=='')?v:'all'; };
     return {
@@ -376,8 +393,10 @@
         else if(cls!==f.classification) return false;
       }
       if(f.q){
+        const row=auditRowFields(e);
         const hay=[e.type,src.subject,src.user,src.requestMethod,src.requestUrl,
-          obj.objowner,obj.objtype,obj.objname,obj.objchanges,net.classification].join(' ').toLowerCase();
+          obj.objowner,obj.objtype,obj.objname,obj.objchanges,net.classification,
+          row.resource,row.verb,row.user].join(' ').toLowerCase();
         if(!hay.includes(f.q)) return false;
       }
       return true;
@@ -461,24 +480,17 @@
     body.innerHTML='';
     let failures=0, unauth=0;
     visibleEvents.forEach((e,i)=>{
-      const src=e.data?.source||{}, net=e.data?.network||{};
+      const net=e.data?.network||{};
       const res=(net.apiCallResult||'').toLowerCase();
       const cls=net.classification||'';
       if(res!=='success') failures++;
       if(cls==='unauthorized_access') unauth++;
-      const resCls=res==='success'?'ok':'err';
-      const resLabel=net.apiCallResult||'—';
-      const parts=(e.type||'').split('.');
-      const shortType=parts.length>=2 ? parts.slice(-2).join(' · ') : (e.type||'—');
-      const stage=net.stage||'—';
-      const clsDisplay=cls?`<span class="${clsCss(cls)}">${esc(formatClassificationLabel(cls))}</span>`:'<span style="color:#aaa">—</span>';
+      const row=auditRowFields(e);
       body.innerHTML+=`<tr class="clickable" onclick="showEvent(${i},this)">
         <td>${esc(formatIst(e.time))}</td>
-        <td class="mono">${esc(shortType)}</td>
-        <td>${esc(src.subject||src.user||'—')}</td>
-        <td><span class="pill tag">${esc(stage)}</span></td>
-        <td>${clsDisplay}</td>
-        <td><span class="pill ${resCls}">${esc(resLabel)}</span></td>
+        <td>${esc(row.user)}</td>
+        <td class="mono">${esc(row.resource)}</td>
+        <td class="mono">${esc(row.verb)}</td>
       </tr>`;
     });
     document.getElementById('stEvents').textContent=currentEvents.length;
