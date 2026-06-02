@@ -39,7 +39,7 @@ spec:
           image: order-service:latest
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8002
+            - containerPort: 8000
           resources:
             requests:
               cpu: "50m"

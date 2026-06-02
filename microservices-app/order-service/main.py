@@ -1,277 +1,162 @@
-from fastapi import FastAPI, HTTPException, Form
+from fastapi import FastAPI, HTTPException, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
-from pymongo import MongoClient
+from typing import Optional, List
 from bson import ObjectId
+from bson.errors import InvalidId
+import motor.motor_asyncio
 import os
-from typing import List
 
-app = FastAPI(
-    title="Order Service",
-    description="Order Processing Microservice — E-Commerce Platform",
-    version="1.0.0",
-)
+app = FastAPI(title="Order Service", description="Order Processing Microservice", version="1.0.0")
 
-# ─── Database Configuration ────────────────────────────────────────────────
-MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://mongodb-service.ecommerce.svc.cluster.local:27017")
 DB_NAME = os.getenv("DB_NAME", "orderdb")
 
-client = MongoClient(MONGO_URL)
+client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
-orders_collection = db["orders"]
+collection = db["orders"]
 
-
-# ─── Models ────────────────────────────────────────────────────────────────
 class OrderCreate(BaseModel):
-    user_id: str
-    product_id: str
-    quantity: int = Field(..., gt=0)
+    customer: str = Field(..., min_length=2)
+    product: str = Field(..., min_length=1)
+    quantity: int = Field(..., ge=1)
+    status: str = "Pending"
 
+class OrderUpdate(BaseModel):
+    customer: Optional[str] = None
+    product: Optional[str] = None
+    quantity: Optional[int] = None
+    status: Optional[str] = None
 
-class OrderResponse(BaseModel):
+class OrderOut(BaseModel):
     id: str
-    user_id: str
-    product_id: str
+    customer: str
+    product: str
     quantity: int
     status: str
 
+def valid_object_id(oid: str) -> ObjectId:
+    try:
+        return ObjectId(oid)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid order ID")
 
-# ─── Utility Function ──────────────────────────────────────────────────────
-def serialize_order(order):
+def order_doc_to_out(doc):
     return {
-        "id": str(order["_id"]),
-        "user_id": order["user_id"],
-        "product_id": order["product_id"],
-        "quantity": order["quantity"],
-        "status": order["status"],
+        "id": str(doc["_id"]),
+        "customer": doc.get("customer", ""),
+        "product": doc.get("product", ""),
+        "quantity": doc.get("quantity", 0),
+        "status": doc.get("status", "Pending"),
     }
 
-
-# ─── Simple UI Style ───────────────────────────────────────────────────────
 HTML_STYLE = """
 <style>
-body{
-font-family: Arial;
-background:#f4f6fb;
-padding:30px;
-}
-h1{
-color:#1d4ed8;
-}
-table{
-border-collapse:collapse;
-width:100%;
-margin-top:20px;
-}
-th,td{
-border:1px solid #ddd;
-padding:10px;
-text-align:center;
-}
-th{
-background:#1d4ed8;
-color:white;
-}
-form{
-margin-bottom:20px;
-}
-input{
-padding:8px;
-margin-right:10px;
-}
-button{
-padding:8px 14px;
-background:#1d4ed8;
-color:white;
-border:none;
-cursor:pointer;
-}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;background:#f7f3e8;color:#1f3b24}
+header{background:linear-gradient(135deg,#315c35,#1f7a3a);padding:20px 45px;color:white;display:flex;gap:15px;align-items:center}
+.logo{font-size:2rem} header span{color:#d8f3dc}
+.container{max-width:1200px;margin:auto;padding:35px 20px}
+.stats-bar{display:flex;gap:18px;margin-bottom:30px;flex-wrap:wrap}
+.stat-card,.panel{background:white;border:1px solid #c7dcc7;border-radius:16px;padding:25px;margin-bottom:25px;box-shadow:0 2px 8px rgba(49,92,53,.12)}
+.stat-card{flex:1;text-align:center}.num{font-size:2rem;font-weight:bold;color:#1f7a3a}.lbl{color:#315c35;font-weight:600}
+.panel h2{color:#1f7a3a;margin-bottom:18px}
+.create-form{display:grid;grid-template-columns:1fr 1fr;gap:16px}.full{grid-column:1/-1}
+label{color:#315c35;font-weight:bold;display:block;margin-bottom:6px}
+input,select{width:100%;padding:12px;border:1px solid #9abc9a;border-radius:8px;background:#fbfaf3}
+.btn{background:linear-gradient(135deg,#315c35,#1f7a3a);color:white;border:none;padding:11px 22px;border-radius:8px;font-weight:bold;cursor:pointer}
+.btn-danger{background:#b91c1c}.btn-sm{padding:6px 12px}
+table{width:100%;border-collapse:collapse}th{background:#e4efdf;color:#315c35;padding:12px;text-align:left}td{padding:12px;border-bottom:1px solid #e6e1cf}
+tr:hover td{background:#f1f6ee}.empty-state{text-align:center;padding:35px;color:#7a997a}
 </style>
 """
 
-
-# ─── UI Dashboard ──────────────────────────────────────────────────────────
-@app.get("/", response_class=HTMLResponse)
-def dashboard():
-
-    orders = list(orders_collection.find())
-
-    rows = ""
-
-    for order in orders:
-        rows += f"""
-        <tr>
-        <td>{order['user_id']}</td>
-        <td>{order['product_id']}</td>
-        <td>{order['quantity']}</td>
-        <td>{order['status']}</td>
-        <td>
-        <form action="/delete/{order['_id']}" method="post">
-        <button>Delete</button>
-        </form>
-        </td>
-        </tr>
-        """
-
-    html = f"""
+def render_page(content):
+    return f"""
     <html>
-    <head>
-    <title>Order Dashboard</title>
-    {HTML_STYLE}
-    </head>
-
+    <head><title>Order Service</title>{HTML_STYLE}</head>
     <body>
-
-    <h1>📦 Order Service Dashboard</h1>
-
-    <h3>Create Order</h3>
-
-    <form action="/create" method="post">
-
-    <input name="user_id" placeholder="User ID" required>
-
-    <input name="product_id" placeholder="Product ID" required>
-
-    <input name="quantity" type="number" placeholder="Quantity" required>
-
-    <button>Create Order</button>
-
-    </form>
-
-    <h3>All Orders</h3>
-
-    <table>
-
-    <tr>
-    <th>User</th>
-    <th>Product</th>
-    <th>Quantity</th>
-    <th>Status</th>
-    <th>Action</th>
-    </tr>
-
-    {rows}
-
-    </table>
-
+      <header><div class="logo">🛍️</div><div><h1>Order Service</h1><span>Order Processing Microservice</span></div></header>
+      <div class="container">{content}</div>
     </body>
     </html>
     """
 
-    return html
+@app.get("/", response_class=HTMLResponse)
+async def dashboard():
+    orders = await collection.find().to_list(1000)
+    total = len(orders)
+    pending = sum(1 for o in orders if o.get("status") == "Pending")
+    delivered = sum(1 for o in orders if o.get("status") == "Delivered")
+    cancelled = sum(1 for o in orders if o.get("status") == "Cancelled")
 
+    rows = ""
+    for o in orders:
+        oid = str(o["_id"])
+        rows += f"""
+        <tr>
+          <td>{oid}</td><td>{o.get('customer','')}</td><td>{o.get('product','')}</td>
+          <td>{o.get('quantity',0)}</td><td>{o.get('status','Pending')}</td>
+          <td>
+            <form action="/delete/{oid}" method="post" style="display:inline">
+              <button class="btn btn-danger btn-sm">Delete</button>
+            </form>
+          </td>
+        </tr>
+        """
 
-# ─── Create Order from UI ─────────────────────────────────────────────────
+    content = f"""
+    <div class="stats-bar">
+      <div class="stat-card"><div class="num">{total}</div><div class="lbl">Total Orders</div></div>
+      <div class="stat-card"><div class="num">{pending}</div><div class="lbl">Pending</div></div>
+      <div class="stat-card"><div class="num">{delivered}</div><div class="lbl">Delivered</div></div>
+      <div class="stat-card"><div class="num">{cancelled}</div><div class="lbl">Cancelled</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>➕ Place New Order</h2>
+      <form class="create-form" action="/create" method="post">
+        <div><label>Customer Name</label><input name="customer" required></div>
+        <div><label>Product Name</label><input name="product" required></div>
+        <div><label>Quantity</label><input name="quantity" type="number" value="1" required></div>
+        <div><label>Status</label><select name="status"><option>Pending</option><option>Delivered</option><option>Cancelled</option></select></div>
+        <div class="full"><button class="btn">Create Order</button></div>
+      </form>
+    </div>
+
+    <div class="panel">
+      <h2>📋 Order History</h2>
+      <table>
+        <tr><th>ID</th><th>Customer</th><th>Product</th><th>Quantity</th><th>Status</th><th>Action</th></tr>
+        {rows if rows else '<tr><td colspan="6" class="empty-state">No orders yet</td></tr>'}
+      </table>
+    </div>
+    """
+    return render_page(content)
+
 @app.post("/create")
-def create_order_form(
-    user_id: str = Form(...),
-    product_id: str = Form(...),
-    quantity: int = Form(...)
-):
-
-    order_data = {
-        "user_id": user_id,
-        "product_id": product_id,
-        "quantity": quantity,
-        "status": "CREATED"
-    }
-
-    orders_collection.insert_one(order_data)
-
+async def create_order(customer: str = Form(...), product: str = Form(...), quantity: int = Form(...), status: str = Form(...)):
+    await collection.insert_one({"customer": customer, "product": product, "quantity": quantity, "status": status})
     return RedirectResponse("/", status_code=303)
 
-
-# ─── Delete Order from UI ─────────────────────────────────────────────────
 @app.post("/delete/{order_id}")
-def delete_order_form(order_id: str):
-
-    orders_collection.delete_one({"_id": ObjectId(order_id)})
-
+async def delete_order(order_id: str):
+    await collection.delete_one({"_id": valid_object_id(order_id)})
     return RedirectResponse("/", status_code=303)
 
+@app.post("/orders/", response_model=OrderOut)
+async def api_create_order(order: OrderCreate):
+    doc = jsonable_encoder(order)
+    result = await collection.insert_one(doc)
+    created = await collection.find_one({"_id": result.inserted_id})
+    return order_doc_to_out(created)
 
-# ─── Root API ─────────────────────────────────────────────────────────────
-@app.get("/api")
-async def root():
-    return {
-        "service": "order-service",
-        "status": "running",
-        "message": "Order Service is operational"
-    }
+@app.get("/orders/", response_model=List[OrderOut])
+async def api_list_orders():
+    docs = await collection.find().to_list(1000)
+    return [order_doc_to_out(d) for d in docs]
 
-
-# ─── Health Check ─────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"service": "order-service", "status": "healthy"}
-
-
-# ─── API: Create Order ────────────────────────────────────────────────────
-@app.post("/orders", response_model=OrderResponse)
-async def create_order(order: OrderCreate):
-
-    order_data = order.dict()
-    order_data["status"] = "CREATED"
-
-    result = orders_collection.insert_one(order_data)
-
-    new_order = orders_collection.find_one({"_id": result.inserted_id})
-
-    return serialize_order(new_order)
-
-
-# ─── API: Get All Orders ──────────────────────────────────────────────────
-@app.get("/orders", response_model=List[OrderResponse])
-async def get_orders():
-
-    orders = orders_collection.find()
-
-    return [serialize_order(order) for order in orders]
-
-
-# ─── API: Get Order by ID ─────────────────────────────────────────────────
-@app.get("/orders/{order_id}", response_model=OrderResponse)
-async def get_order(order_id: str):
-
-    try:
-        order = orders_collection.find_one({"_id": ObjectId(order_id)})
-    except:
-        raise HTTPException(status_code=400, detail="Invalid Order ID")
-
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-
-    return serialize_order(order)
-
-
-# ─── API: Update Order Status ─────────────────────────────────────────────
-@app.put("/orders/{order_id}/status")
-async def update_order_status(order_id: str, status: str):
-
-    try:
-        result = orders_collection.update_one(
-            {"_id": ObjectId(order_id)},
-            {"$set": {"status": status}}
-        )
-    except:
-        raise HTTPException(status_code=400, detail="Invalid Order ID")
-
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Order not found")
-
-    return {"message": "Order status updated successfully"}
-
-
-# ─── API: Delete Order ────────────────────────────────────────────────────
-@app.delete("/orders/{order_id}")
-async def delete_order(order_id: str):
-
-    try:
-        result = orders_collection.delete_one({"_id": ObjectId(order_id)})
-    except:
-        raise HTTPException(status_code=400, detail="Invalid Order ID")
-
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Order not found")
-
-    return {"message": "Order deleted successfully"}
+    return {"service": "order-service", "status": "healthy", "db": DB_NAME}

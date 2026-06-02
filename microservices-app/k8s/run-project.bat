@@ -258,6 +258,7 @@ timeout /t 1 /nobreak >nul
 REM Grafana port-forward removed — using Grafana Cloud at https://securelogger.grafana.net
 start "pf-opensearch-ui" cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n ecommerce       svc/opensearch-dashboards 5601:5601
 
+
 echo.
 echo [Falco] Optional runtime security (set SKIP_FALCO=1 to skip^).
 if /I "%SKIP_FALCO%"=="1" (
@@ -289,21 +290,22 @@ echo   [Payment service]       http://127.0.0.1:18103
 echo   [Notification service]  http://127.0.0.1:18104
 echo ============================================================
 echo.
-
-REM ── Auto-open browser tabs (skip if SKIP_BROWSER=1) ─────────────────────
+REM ── Auto-open ecommerce UI only (skip if SKIP_BROWSER=1) ─────────────────
 if /I "%SKIP_BROWSER%"=="1" (
   echo      SKIP_BROWSER=1 - skipping auto-open.
   goto skip_browser
 )
-echo      Opening browser tabs...
-timeout /t 3 /nobreak >nul
-start "" "http://127.0.0.1:18015/control-plane/ui"
-timeout /t 1 /nobreak >nul
-start "" "http://127.0.0.1:18015/control-plane/architecture/ui"
-timeout /t 1 /nobreak >nul
-start "" "https://securelogger.grafana.net"
-timeout /t 1 /nobreak >nul
-start "" "http://127.0.0.1:5601"
+
+echo   [SecureShop Ecommerce]  http://127.0.0.1:18000/ecommerce.html
+
+start "ecommerce-ui" cmd /k "cd /d D:\HPE_CPP\microservices-app && python -m http.server 18000"
+start "" "http://127.0.0.1:18000/ecommerce.html"
+
+
+
+REM return back to k8s folder
+cd /d "%~dp0"
+
 :skip_browser
 
 echo.
@@ -317,7 +319,7 @@ echo.
 echo TIPs:
 echo   SET SKIP_IMAGE_BUILD=1    skip Docker image builds on re-run
 echo   SET SKIP_AUDIT_WAIT=1     skip rollout wait at step 5
-echo   SET SKIP_BROWSER=1        skip auto-opening browser tabs
+echo   SET SKIP_BROWSER=1        skip auto-opening ecommerce UI
 echo   SET SKIP_FALCO=1          skip Helm install of Falco at the end
 echo   See sample-audit-triggers.txt for full event + classification catalog
 echo.

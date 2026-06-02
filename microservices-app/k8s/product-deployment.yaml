@@ -39,7 +39,7 @@ spec:
           image: product-service:latest
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8001
+            - containerPort: 8000
           env:
             - name: MONGO_URL
               value: "mongodb://mongodb-service.ecommerce.svc.cluster.local:27017"
