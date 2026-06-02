@@ -1,0 +1,16 @@
+@echo off
+echo Installing Linkerd Gateway API CRDs...
+kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+
+echo Installing Linkerd CRDs...
+linkerd install --crds | kubectl apply -f -
+
+echo Installing Linkerd control plane...
+linkerd install --set proxyInit.runAsRoot=true | kubectl apply -f -
+
+echo Installing Linkerd Viz...
+linkerd viz install | kubectl apply -f -
+
+echo Checking Linkerd...
+linkerd check
+linkerd viz check

@@ -39,7 +39,7 @@ spec:
           image: payment-service:latest
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8003
+            - containerPort: 8000
           resources:
             requests:
               cpu: "50m"

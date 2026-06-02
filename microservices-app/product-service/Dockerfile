@@ -3,7 +3,7 @@ FROM python:3.11-slim AS base
 
 WORKDIR /app
 
-# Copy and install Python deps (wheels only — no apt)
+# Copy and install Python deps (wheels only — no apt, works when Docker DNS cannot reach Debian mirrors)
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
@@ -27,7 +27,7 @@ COPY main.py site_favicon.py site.svg ./
 USER appuser
 
 # Expose service port
-EXPOSE 8001
+EXPOSE 8000
 
 # Start server
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "2"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
