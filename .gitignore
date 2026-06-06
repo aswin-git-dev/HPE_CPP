@@ -18,3 +18,10 @@ Thumbs.db
 # ─── Minikube logs (large, machine-specific) ────────────────────────────────
 microservices-app/k8s/minikube-logs.txt
 microservices-app/k8s/minikube_logs.txt
+
+venv/
+*.log
+*.db
+__pycache__/
+.env
+.vscode/

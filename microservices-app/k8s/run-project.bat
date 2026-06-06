@@ -258,6 +258,33 @@ timeout /t 1 /nobreak >nul
 REM Grafana port-forward removed — using Grafana Cloud at https://securelogger.grafana.net
 start "pf-opensearch-ui" cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n ecommerce       svc/opensearch-dashboards 5601:5601
 
+timeout /t 1 /nobreak >nul
+
+REM ── Smart Security Pipeline: Kafka + OpenSearch + ML + Alerts ─────────────
+echo.
+echo [Security Pipeline] Starting Kafka, OpenSearch, ML API, ML consumer and alert pipeline...
+
+REM Kafka port-forward for kafka_ml_consumer.py
+start "pf-kafka" cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n ecommerce svc/kafka 9092:9092
+timeout /t 1 /nobreak >nul
+
+REM OpenSearch API port-forward for storing ML scored events
+start "pf-opensearch-api" cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n ecommerce svc/opensearch 9200:9200
+timeout /t 1 /nobreak >nul
+
+REM Start ML API
+start "ml-api" cmd /k "cd /d D:\HPE_CPP\ml-anomaly-service && call venv\Scripts\activate && python -m uvicorn main:app --host 0.0.0.0 --port 8000"
+timeout /t 5 /nobreak >nul
+
+REM Start Kafka ML consumer: Kafka -> ML -> OpenSearch -> Email Alert
+start "ml-consumer-alerts" cmd /k "cd /d D:\HPE_CPP\ml-anomaly-service && call venv\Scripts\activate && python kafka_ml_consumer.py"
+
+echo      Security pipeline windows started.
+echo      Kafka: localhost:9092
+echo      OpenSearch API: http://127.0.0.1:9200
+echo      OpenSearch Dashboards: http://127.0.0.1:5601
+echo      ML API: http://127.0.0.1:8000
+echo.
 
 echo.
 echo [Falco] Optional runtime security (set SKIP_FALCO=1 to skip^).
@@ -282,6 +309,11 @@ echo   [Raw Events JSON]       http://127.0.0.1:18015/control-plane/events
 echo.
 echo   [Grafana Cloud]         https://securelogger.grafana.net  (login with Grafana Cloud account)
 echo   [OpenSearch Dashboards] http://127.0.0.1:5601
+echo   [OpenSearch API]        http://127.0.0.1:9200
+echo   [ML API]                http://127.0.0.1:8000/docs
+echo   [Anomaly Index]         http://127.0.0.1:9200/security-anomalies/_search?pretty
+echo   [Alert Log]             D:\HPE_CPP\ml-anomaly-service\alerts.log
+
 echo.
 echo   [User service]          http://127.0.0.1:18100
 echo   [Product service]       http://127.0.0.1:18101
