@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: audit-kafka-producer-code
+  namespace: ecommerce
+data:
+  producer.py: |
+    import json
+    import time
+    from kafka import KafkaProducer
+
+    AUDIT_FILE = "/host/var/log/kubernetes/audit/audit.log"
+    KAFKA_BOOTSTRAP = "10.244.0.3:9092"
+    TOPIC = "k8s-audit-raw"
+
+    producer = None
+
+    while producer is None:
+        try:
+            print("Trying to connect to Kafka...")
+            producer = KafkaProducer(
+                bootstrap_servers=KAFKA_BOOTSTRAP,
+                api_version=(3, 7, 0),
+                value_serializer=lambda v: json.dumps(v).encode("utf-8")
+            )
+            print("Connected to Kafka")
+        except Exception as e:
+            print("Kafka not ready yet:", e)
+            time.sleep(5)
+
+    print("Audit Kafka Producer started")
+
+    with open(AUDIT_FILE, "r", encoding="utf-8") as f:
+        f.seek(0, 2)
+
+        while True:
+            line = f.readline()
+
+            if not line:
+                time.sleep(1)
+                continue
+
+            line = line.strip()
+
+            if not line:
+                continue
+
+            try:
+                raw_event = json.loads(line)
+                producer.send(TOPIC, raw_event)
+                producer.flush()
+                print("Sent:", raw_event.get("verb"), raw_event.get("requestURI"))
+            except Exception as e:
+                print("Error:", e)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-kafka-producer
+  namespace: ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: audit-kafka-producer
+  template:
+    metadata:
+      labels:
+        app: audit-kafka-producer
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: minikube
+      containers:
+        - name: audit-kafka-producer
+          image: python:3.11-slim
+          command: ["/bin/sh", "-c"]
+          args:
+          - pip install kafka-python && python -u /app/producer.py
+          volumeMounts:
+            - name: producer-code
+              mountPath: /app
+            - name: audit-log
+              mountPath: /host/var/log/kubernetes/audit
+              readOnly: true
+      volumes:
+        - name: producer-code
+          configMap:
+            name: audit-kafka-producer-code
+        - name: audit-log
+          hostPath:
+            path: /var/log/kubernetes/audit
+            type: Directory

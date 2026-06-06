@@ -1,0 +1,12 @@
+{
+  "version": "v20260530_014414",
+  "trained_at": "2026-05-30T01:44:14.633780+00:00",
+  "seq_len": 20,
+  "hidden_size": 64,
+  "input_size": 29,
+  "n_train": 5598,
+  "n_val": 1400,
+  "val_auc": 0.952916180852442,
+  "model_file": "gru_v20260530_014414.pkl",
+  "scaler_file": "gru_scaler_v20260530_014414.pkl"
+}
