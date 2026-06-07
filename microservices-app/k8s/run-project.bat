@@ -260,13 +260,16 @@ start "pf-opensearch-ui" cmd /k call "%~dp0port-forward-retry.cmd" port-forward 
 
 timeout /t 1 /nobreak >nul
 
+taskkill /F /IM python.exe >nul 2>&1
+
 REM ── Smart Security Pipeline: Kafka + OpenSearch + ML + Alerts ─────────────
 echo.
 echo [Security Pipeline] Starting Kafka, OpenSearch, ML API, ML consumer and alert pipeline...
 
-REM Kafka port-forward for kafka_ml_consumer.py
+REM Stop old kubectl port-forward windows
+taskkill /F /IM kubectl.exe >nul 2>&1
+
 start "pf-kafka" cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n ecommerce svc/kafka 9092:9092
-timeout /t 1 /nobreak >nul
 
 REM OpenSearch API port-forward for storing ML scored events
 start "pf-opensearch-api" cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n ecommerce svc/opensearch 9200:9200
