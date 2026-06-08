@@ -17,7 +17,7 @@ RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 COPY --from=base /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=base /usr/local/bin /usr/local/bin
 
-ENV CACHE_BUSTER=2026-04-14_v1
+ENV CACHE_BUSTER=2026-06-08_falco_action_cmd
 COPY app ./app
 
 USER appuser

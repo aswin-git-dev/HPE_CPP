@@ -86,7 +86,7 @@ class IFRegistry:
         saved = self.meta.get("feature_cols", [])
         if saved != FEATURE_COLS:
             raise RuntimeError(f"Feature mismatch. Retrain model.\n  Saved: {saved}\n  Current: {FEATURE_COLS}")
-        print(f"[scorer] ✅ IF model {self.version} ready (trained on {self.meta['n_train']} events).")
+        print(f"[scorer] IF model {self.version} ready (trained on {self.meta['n_train']} events).")
 
     def reload_if_updated(self):
         path = os.path.join(MODEL_DIR, "latest.json")
@@ -118,7 +118,7 @@ class GRURegistry:
         with open(os.path.join(MODEL_DIR, ptr["meta_file"])) as f:
             self.meta = json.load(f)
         self._loaded_file = mf
-        print(f"[scorer] ✅ GRU model {self.meta['version']} ready.")
+        print(f"[scorer] GRU model {self.meta['version']} ready.")
 
     def reload_if_updated(self):
         path = os.path.join(MODEL_DIR, "gru_latest.json")

@@ -8,7 +8,6 @@ from bson.errors import InvalidId
 import motor.motor_asyncio
 import os
 
-<<<<<<< HEAD
 from site_favicon import site_favicon_link_tag
 
 app = FastAPI(
@@ -16,9 +15,6 @@ app = FastAPI(
     description="Order Processing Microservice — E-Commerce Platform",
     version="1.0.0",
 )
-=======
-app = FastAPI(title="Order Service", description="Order Processing Microservice", version="1.0.0")
->>>>>>> service-mesh
 
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://mongodb-service.ecommerce.svc.cluster.local:27017")
 DB_NAME = os.getenv("DB_NAME", "orderdb")
@@ -85,16 +81,11 @@ tr:hover td{background:#f1f6ee}.empty-state{text-align:center;padding:35px;color
 def render_page(content):
     return f"""
     <html>
-<<<<<<< HEAD
     <head>
     <title>Order Dashboard</title>
     {site_favicon_link_tag()}
     {HTML_STYLE}
     </head>
-
-=======
-    <head><title>Order Service</title>{HTML_STYLE}</head>
->>>>>>> service-mesh
     <body>
       <header><div class="logo">🛍️</div><div><h1>Order Service</h1><span>Order Processing Microservice</span></div></header>
       <div class="container">{content}</div>

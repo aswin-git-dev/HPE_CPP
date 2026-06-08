@@ -23,6 +23,11 @@ class EventStoreService:
     the in-memory buffer (up to ``max_events`` most recent).
     """
 
+    # No-pod Falco events (bare container / host processes, e.g. python3.11
+    # multiprocessing) with the same classification are deduplicated within this
+    # window to stop them flooding the ring buffer and evicting real audit events.
+    _FALCO_NOISY_DEDUP_WINDOW_S: int = 30
+
     def __init__(
         self,
         max_events: int = 5000,
@@ -34,6 +39,8 @@ class EventStoreService:
         self._ttl_seconds = ttl_seconds if ttl_seconds and ttl_seconds > 0 else 0
         self._persistent_path: Optional[Path] = None
         self._current_file_handle = None
+        # classification → last ingested monotonic (for no-pod Falco dedup)
+        self._falco_noisy_seen: Dict[str, float] = {}
 
         if persistent_path:
             p = Path(persistent_path)
@@ -105,6 +112,22 @@ class EventStoreService:
     # ── Public API ───────────────────────────────────────────────────────────
 
     def index_event(self, event: Dict[str, Any]) -> None:
+        # Deduplicate noisy no-pod Falco events (e.g. python3.11 multiprocessing
+        # repeatedly triggering "Contact K8S API Server From Container").
+        # Events with a real namespace or pod_name are never deduplicated.
+        if (
+            event.get("source_type") == "falco"
+            and not event.get("namespace")
+            and not event.get("pod_name")
+        ):
+            cls_key = event.get("classification") or "falco"
+            now = time.monotonic()
+            with self._lock:
+                last = self._falco_noisy_seen.get(cls_key, 0.0)
+                if now - last < self._FALCO_NOISY_DEDUP_WINDOW_S:
+                    return  # drop duplicate
+                self._falco_noisy_seen[cls_key] = now
+
         with self._lock:
             row = dict(event)
             row[_INGESTED] = time.monotonic()
@@ -123,8 +146,13 @@ class EventStoreService:
             items = list(self._events)
         if limit <= 0:
             return []
+        ranked = sorted(
+            items,
+            key=lambda e: str(e.get("timestamp") or ""),
+            reverse=True,
+        )
         out = []
-        for e in reversed(items[-limit:]):
+        for e in ranked[:limit]:
             out.append({k: v for k, v in e.items() if k != _INGESTED})
         return out
 

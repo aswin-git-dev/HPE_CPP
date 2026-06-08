@@ -135,8 +135,9 @@
   <div class="nav-links">
     <div class="limit-row">
       <label>Limit</label>
-      <input id="limit" type="number" min="1" max="500" value="50"/>
+      <input id="limit" type="number" min="1" max="500" value="100"/>
     </div>
+    <span id="liveBadge" class="pill ok" style="font-size:.72rem;padding:4px 10px;">Live · 5s</span>
     <button class="nav-btn" type="button" onclick="refreshAll()">
       <svg width="14" height="14" viewBox="0 0 24 24" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
       Refresh
@@ -254,12 +255,12 @@
       </button>
     </div>
     <p class="audit-hint" style="margin:0;padding:8px 16px 10px;font-size:.78rem;color:var(--muted);border-bottom:1px solid var(--border);background:#fafcf9;line-height:1.45;">
-      Shows recent API traffic from the whole cluster (nodes, controllers, and users). Search for <code style="font-size:.85em;">sec-demo</code> or <code style="font-size:.85em;">escalation-sa</code>, or filter by namespace. Click a row to open details — <strong>Copy JSON</strong> copies the full payload.
+      Kubernetes audit events show the API caller (e.g. <code style="font-size:.85em;">minikube-user</code>). <strong>Falco</strong> and <strong>kubectl exec</strong> rows show the pod/workload with <strong>Resource = falco</strong>; <strong>ACTION</strong> is what ran in the container (e.g. <em>Read sensitive file</em>). Filter <strong>Classification → falco_*</strong>. Click a row for the command line and full JSON.
     </p>
     <div class="tbl-wrap tbl-wrap--audit">
       <table class="tbl-data tbl-audit">
         <colgroup>
-          <col style="width:22%"/><col style="width:38%"/><col style="width:22%"/><col style="width:18%"/>
+          <col style="width:18%"/><col style="width:30%"/><col style="width:26%"/><col style="width:26%"/>
         </colgroup>
         <thead>
           <tr>
@@ -351,8 +352,25 @@
     return String(cls).replace(/_/g,' ');
   }
 
+  function isFalcoEvent(e){
+    const src=e.data?.source||{}, net=e.data?.network||{};
+    return src.requestingService==='falco'
+      || String(net.classification||'').startsWith('falco_')
+      || String(e.type||'').includes('.falco.');
+  }
+
   function auditRowFields(e){
-    const src=e.data?.source||{}, obj=e.data?.object||{};
+    const src=e.data?.source||{}, obj=e.data?.object||{}, net=e.data?.network||{};
+    if(isFalcoEvent(e)){
+      const action=src.requestMethod
+        || (obj.objchanges||'').split('|')[0].replace(/^[^:]+:\s*/,'').trim().slice(0,120)
+        || 'Runtime security detection';
+      return {
+        user: src.subject||src.user||'—',
+        resource: 'falco',
+        verb: action,
+      };
+    }
     let resource=obj.objtype||'';
     let verb=(src.requestMethod||'').toLowerCase();
     if(!resource||!verb){
@@ -462,7 +480,14 @@
       toast('Server returned 0 events — retaining last known data');
       return;
     }
-    currentEvents=j.events||[];
+    // Merge new events into currentEvents rather than replacing, so previously
+    // visible events are not lost when they fall out of the latest-N fetch window.
+    const newBatch = j.events||[];
+    const existingIds = new Set(currentEvents.map(e=>e.id));
+    const added = newBatch.filter(e=>!existingIds.has(e.id));
+    currentEvents = [...currentEvents, ...added]
+      .sort((a,b)=>String(b.time||'').localeCompare(String(a.time||'')))
+      .slice(0, 2000);
     const resourceSel=document.getElementById('resourceFilter');
     if(resourceSel){
       const cur=resourceSel.value;
@@ -475,7 +500,8 @@
 
   function renderEvents(){
     const limit=Number(document.getElementById('limit').value||50);
-    visibleEvents=applyFilters(currentEvents).slice(0,limit);
+    const sorted=applyFilters(currentEvents).slice().sort((a,b)=>String(b.time||'').localeCompare(String(a.time||'')));
+    visibleEvents=sorted.slice(0,limit);
     const body=document.getElementById('eventsBody');
     body.innerHTML='';
     let failures=0, unauth=0;
@@ -490,7 +516,7 @@
         <td>${esc(formatIst(e.time))}</td>
         <td>${esc(row.user)}</td>
         <td class="mono">${esc(row.resource)}</td>
-        <td class="mono">${esc(row.verb)}</td>
+        <td class="mono" title="${esc(row.verb)}">${esc(row.verb)}</td>
       </tr>`;
     });
     document.getElementById('stEvents').textContent=currentEvents.length;
@@ -547,8 +573,23 @@
     document.getElementById('detailPanel').scrollIntoView({behavior:'smooth',block:'start'});
   }
 
-  async function refreshAll(){ await Promise.all([refreshPods(), refreshEvents()]); }
+  let autoRefreshTimer=null;
+  const AUTO_REFRESH_MS=5000;
+
+  async function refreshAll(){
+    const badge=document.getElementById('liveBadge');
+    if(badge) badge.textContent='Refreshing...';
+    try { await Promise.all([refreshPods(), refreshEvents()]); }
+    finally { if(badge) badge.textContent='Live · 5s'; }
+  }
+
+  function startAutoRefresh(){
+    if(autoRefreshTimer) clearInterval(autoRefreshTimer);
+    autoRefreshTimer=setInterval(()=>{ refreshAll(); }, AUTO_REFRESH_MS);
+  }
+
   refreshAll();
+  startAutoRefresh();
 
   /* ── Export helpers ───────────────────────────────────────────────────────── */
   const EXPORT_COLS = [

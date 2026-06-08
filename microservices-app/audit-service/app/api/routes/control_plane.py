@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qs, unquote, urlparse
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, HTMLResponse
@@ -20,6 +21,272 @@ def _slug_falco_rule(name: str) -> str:
 
 
 MONITOR_DATA_SCHEMA = "urn:microservices-monitor:security:audit:schema:v1"
+
+# ACTION column labels keyed by Falco rule (requestMethod).
+_FALCO_ACTION_BY_RULE: Dict[str, str] = {
+    "read sensitive file untrusted": "Read sensitive file",
+    "write below etc": "Wrote under etc",
+    "write below binary dir": "Wrote binary directory",
+    "write below root": "Wrote under root",
+    "terminal shell in container": "Spawned interactive shell",
+    "contact k8s api server from container": "Contacted Kubernetes API",
+    "launch package management process in container": "Ran package manager",
+    "netcat remote code execution in container": "Netcat remote execution",
+    "read ssh information": "Read SSH information",
+    "find aws credentials": "Searched AWS credentials",
+    "search private keys or passwords": "Searched private keys",
+    "system info discovery": "Collected system information",
+    "clear log activities": "Cleared log activities",
+    "modify binary dirs": "Modified binary directories",
+}
+
+# Partial rule-name fallback when exact key does not match.
+_FALCO_ACTION_RULE_HINTS: List[tuple[str, str]] = [
+    ("sensitive file", "Read sensitive file"),
+    ("write below etc", "Wrote under etc"),
+    ("write below binary", "Wrote binary directory"),
+    ("write below root", "Wrote under root"),
+    ("terminal shell", "Spawned interactive shell"),
+    ("k8s api server", "Contacted Kubernetes API"),
+    ("package management", "Ran package manager"),
+    ("netcat", "Netcat remote execution"),
+    ("ssh information", "Read SSH information"),
+    ("aws credentials", "Searched AWS credentials"),
+    ("private keys", "Searched private keys"),
+    ("system info discovery", "Collected system information"),
+    ("clear log", "Cleared log activities"),
+    ("modify binary", "Modified binary directories"),
+]
+
+
+def _falco_field_lookup(fields: Dict[str, Any], *keys: str) -> Optional[str]:
+    for key in keys:
+        val = fields.get(key)
+        if val is None:
+            continue
+        text = str(val).strip()
+        if text and text != "<NA>":
+            return text
+    return None
+
+
+def _falco_user_label(
+    ns: Optional[str],
+    pod: Optional[str],
+    proc: Optional[str],
+    fields: Dict[str, Any],
+) -> str:
+    runtime_user = _falco_field_lookup(fields, "user.name", "user")
+    if ns and pod:
+        workload = f"{ns}/{pod}"
+    elif pod:
+        workload = pod
+    elif ns:
+        workload = ns
+    elif proc:
+        workload = proc
+    else:
+        workload = "container"
+    if runtime_user:
+        return f"{workload} · {runtime_user}"
+    return workload
+
+
+def _falco_action_from_rule(rule: str) -> Optional[str]:
+    key = rule.lower().strip()
+    hit = _FALCO_ACTION_BY_RULE.get(key)
+    if hit:
+        return hit
+    for hint, label in _FALCO_ACTION_RULE_HINTS:
+        if hint in key:
+            return label
+    return None
+
+
+def _falco_action_from_command(msg: str, fields: Dict[str, Any]) -> Optional[str]:
+    """Map ACTION to the command or file path Falco observed in the container."""
+    cmd = (_falco_field_lookup(fields, "proc.cmdline", "command") or "").lower()
+    path = (_falco_field_lookup(fields, "fd.name", "file", "evt.arg.data") or "").lower()
+    proc = (_falco_field_lookup(fields, "proc.name", "process") or "").lower()
+    hay = f"{cmd} {path} {msg}".lower()
+
+    if any(p in hay for p in ("/etc/shadow", "/etc/sudoers", "/etc/passwd")):
+        return "Read sensitive file"
+    if any(p in hay for p in ("/root/.aws/credentials", ".aws/credentials", "google_compute_engine")):
+        return "Searched AWS credentials"
+    if ".ssh" in hay or "/etc/ssh" in hay:
+        return "Read SSH information"
+    if any(p in hay for p in ("/etc/hacked", "/etc/malicious", "touch /etc", "mkdir /etc")) or (
+        path.startswith("/etc/") and any(w in cmd for w in ("touch", "mkdir", "write", "open"))
+    ):
+        return "Wrote under etc"
+    # Only match binary-dir writes when the *target file path* (fd.name) is under a
+    # binary directory — NOT the process executable path, which legitimately lives
+    # under /usr/local/bin for python/node/etc. and would otherwise false-match
+    # every event produced by those runtimes.
+    if "/bin/nc" in cmd or "touch /bin" in cmd or (
+        path.startswith(("/bin/", "/usr/local/bin", "/sbin/"))
+        and any(w in cmd for w in ("touch", "write", "open", "cp", "mv"))
+    ):
+        return "Wrote binary directory"
+    if any(p in cmd for p in ("apk add", "apt-get install", "apt install", "yum install", "dnf install")):
+        return "Ran package manager"
+    if proc in ("sh", "bash", "zsh", "dash", "ksh", "csh") or " sh -c" in cmd or cmd.startswith("sh "):
+        return "Spawned interactive shell"
+    if "uname" in cmd:
+        return "Collected system information"
+    if "cat " in cmd and "/etc/" in cmd:
+        return "Read sensitive file"
+    if ":443" in path and ("10.96.0.1" in path or "10.96." in path):
+        return "Contacted Kubernetes API"
+    if "connect" in hay and "10.96.0.1" in hay:
+        return "Contacted Kubernetes API"
+    return None
+
+
+def _falco_action_label(rule: str, msg: str, fields: Dict[str, Any]) -> str:
+    return (
+        _falco_action_from_command(msg, fields)
+        or _falco_action_from_rule(rule)
+        or "Runtime security alert"
+    )
+
+
+def _falco_action_detail(rule: str, msg: str, fields: Dict[str, Any]) -> str:
+    """Executed command / path for detail panel (not the ACTION column)."""
+    proc = _falco_field_lookup(fields, "proc.name", "process")
+    path = _falco_field_lookup(fields, "fd.name", "file")
+    cmd = _falco_field_lookup(fields, "proc.cmdline", "command")
+    parts: List[str] = []
+    if cmd:
+        parts.append(cmd if len(cmd) <= 160 else cmd[:157] + "...")
+    if path and path not in (cmd or ""):
+        parts.append(path)
+    if proc and proc not in (cmd or ""):
+        parts.append(f"process={proc}")
+    if not parts:
+        parts.append(str(msg).strip() or rule)
+    return " | ".join(parts)[:512]
+
+
+def _is_k8s_exec_audit(event: Dict[str, Any], raw: Dict[str, Any]) -> bool:
+    if event.get("classification") == "exec_access":
+        return True
+    sr = (event.get("subresource") or "").lower()
+    if sr in ("exec", "attach", "portforward"):
+        return True
+    uri = (raw.get("requestURI") or event.get("message") or "").lower()
+    return any(p in uri for p in ("/exec", "/attach", "/portforward"))
+
+
+def _parse_k8s_exec_command(raw: Dict[str, Any], event: Dict[str, Any]) -> Optional[str]:
+    """Rebuild container command from kubectl exec audit requestURI (?command=cat&command=/etc/shadow)."""
+    uri = raw.get("requestURI") or ""
+    if uri and "/exec" in uri:
+        qs = parse_qs(urlparse(uri).query, keep_blank_values=True)
+        parts = qs.get("command") or []
+        if parts:
+            return " ".join(unquote(p) for p in parts).strip() or None
+
+    # Some audit pipelines embed the command in the message URI fragment.
+    msg = event.get("message") or ""
+    m = re.search(r"uri=([^\s]+)", msg)
+    if m:
+        qs = parse_qs(urlparse(m.group(1)).query, keep_blank_values=True)
+        parts = qs.get("command") or []
+        if parts:
+            return " ".join(unquote(p) for p in parts).strip() or None
+
+    req_obj = raw.get("requestObject")
+    if isinstance(req_obj, dict):
+        for key in ("command", "commands"):
+            val = req_obj.get(key)
+            if isinstance(val, list) and val:
+                return " ".join(str(v) for v in val).strip() or None
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+    return None
+
+
+def _to_monitor_exec_runtime_payload(source_urn: str, event: Dict[str, Any]) -> Dict[str, Any]:
+    """Map kubectl exec audit events to Falco-style monitor rows (WSL2 / no syscall Falco)."""
+    raw = event.get("raw_event", {}) if isinstance(event.get("raw_event"), dict) else {}
+    ns = event.get("namespace")
+    pod = event.get("resource_name")
+    cmd = _parse_k8s_exec_command(raw, event) or ""
+    fields: Dict[str, Any] = {"proc.cmdline": cmd, "command": cmd}
+    if cmd:
+        fields["proc.name"] = cmd.split()[0]
+
+    action_summary = _falco_action_label("exec", cmd, fields) if cmd else "Container exec"
+    action_detail = cmd or (raw.get("requestURI") or event.get("message") or "exec")
+    invoker = event.get("effective_user") or event.get("user_name") or "unknown"
+    workload = f"{ns}/{pod}" if ns and pod else (pod or ns or invoker)
+
+    status_code = event.get("status_code")
+    call_result = "Success" if (status_code or 200) < 400 else "Failure"
+    classification = "falco_exec_from_audit"
+    rule = "exec-from-audit"
+
+    return {
+        "specversion": "1.0",
+        "id": event.get("event_id"),
+        "source": source_urn,
+        "type": f"com.microservicesmonitor.falco.{rule}",
+        "time": event.get("timestamp"),
+        "invocationtime": event.get("invocation_time") or event.get("timestamp"),
+        "completetime": event.get("completion_time") or event.get("timestamp"),
+        "dataContentType": "application/json",
+        "dataSchema": MONITOR_DATA_SCHEMA,
+        "securityRelevant": event.get("security_relevant") or "yes",
+        "data": {
+            "source": {
+                "subject": workload,
+                "user": workload,
+                "requestRoles": f"invoked-by:{invoker}",
+                "requestPrivileges": f"falco:{rule}",
+                "requestingService": "falco",
+                "requestMethod": action_summary,
+                "requestUrl": action_detail[:512],
+                "requestSource": (raw.get("sourceIPs") or [None])[0] if isinstance(raw.get("sourceIPs"), list) else None,
+                "requestPort": None,
+            },
+            "destination": {
+                "requestedCall": f"{action_summary}: {action_detail[:280]}",
+                "destination": "container-runtime",
+                "destinationPort": None,
+                "l4protocol": None,
+                "protocolBinding": None,
+                "encryption": None,
+                "destinationService": "falco",
+                "destinationUserRoles": None,
+                "destinationUserPrivs": None,
+                "apiGroup": None,
+            },
+            "network": {
+                "eventLocation": "container-runtime",
+                "stage": event.get("stage") or "audit-exec",
+                "apiCallResult": call_result,
+                "eventCount": "1",
+                "statusCode": status_code,
+                "classification": classification,
+                "severity": event.get("severity"),
+            },
+            "object": {
+                "objname": pod,
+                "objtype": "falco",
+                "objowner": ns,
+                "objperms": f"falco:{rule}",
+                "objaccessresult": call_result,
+                "assertedroles": f"invoked-by:{invoker}",
+                "assertedprivs": cmd or rule,
+                "objchanges": cmd or event.get("message"),
+                "objcreatetime": event.get("invocation_time") or event.get("timestamp"),
+                "objmodtime": event.get("completion_time") or None,
+                "objdeletetime": None,
+            },
+        },
+    }
 
 
 def _to_monitor_falco_payload(source_urn: str, event: Dict[str, Any]) -> Dict[str, Any]:
@@ -48,6 +315,9 @@ def _to_monitor_falco_payload(source_urn: str, event: Dict[str, Any]) -> Dict[st
     rule = event.get("event_type") or "falco_alert"
     evt_type = f"com.microservicesmonitor.falco.{_slug_falco_rule(str(rule))}"
     msg = event.get("message") or rule
+    action_summary = _falco_action_label(str(rule), str(msg), fields)
+    action_detail = _falco_action_detail(str(rule), str(msg), fields)
+    user_label = _falco_user_label(ns, pod, proc, fields)
     falco_src = raw.get("source")
     if isinstance(falco_src, str) and falco_src.strip():
         stage = falco_src.strip()
@@ -71,18 +341,18 @@ def _to_monitor_falco_payload(source_urn: str, event: Dict[str, Any]) -> Dict[st
         "securityRelevant": security_relevant,
         "data": {
             "source": {
-                "subject": subject,
-                "user": subject,
-                "requestRoles": None,
+                "subject": user_label or subject,
+                "user": user_label or subject,
+                "requestRoles": event.get("severity"),
                 "requestPrivileges": f"falco:{rule}",
                 "requestingService": "falco",
-                "requestMethod": "DETECTION",
-                "requestUrl": msg[:512] if isinstance(msg, str) else str(msg)[:512],
+                "requestMethod": action_summary,
+                "requestUrl": action_detail[:512],
                 "requestSource": fields.get("fd.name") or fields.get("fd.sip"),
                 "requestPort": None,
             },
             "destination": {
-                "requestedCall": f"{rule}: {msg[:280]}" if isinstance(msg, str) else str(rule),
+                "requestedCall": f"{rule}: {action_detail[:280]}",
                 "destination": "container-runtime",
                 "destinationPort": None,
                 "l4protocol": None,
@@ -104,7 +374,7 @@ def _to_monitor_falco_payload(source_urn: str, event: Dict[str, Any]) -> Dict[st
             },
             "object": {
                 "objname": pod or container or rule,
-                "objtype": "falco",
+                "objtype": f"runtime/{rule}",
                 "objowner": ns,
                 "objperms": f"falco:{rule}",
                 "objaccessresult": call_result,
@@ -119,11 +389,19 @@ def _to_monitor_falco_payload(source_urn: str, event: Dict[str, Any]) -> Dict[st
     }
 
 
-def _to_monitor_payload(source_urn: str, event: Dict[str, Any]) -> Dict[str, Any]:
+def _to_monitor_payload(source_urn: str, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if event.get("source_type") == "falco":
         return _to_monitor_falco_payload(source_urn, event)
 
-    raw = event.get("raw_event", {})
+    raw = event.get("raw_event", {}) if isinstance(event.get("raw_event"), dict) else {}
+
+    # kubectl exec audit: show as Falco row (container action) instead of pods/create.
+    if event.get("source_type") == "k8s_audit" and _is_k8s_exec_audit(event, raw):
+        stage = (event.get("stage") or "").strip()
+        if stage and stage != "ResponseComplete":
+            return None
+        return _to_monitor_exec_runtime_payload(source_urn, event)
+
     user_raw = raw.get("user", {}) if isinstance(raw.get("user"), dict) else {}
     groups_raw = user_raw.get("groups", []) if isinstance(user_raw.get("groups"), list) else []
 
@@ -240,7 +518,10 @@ def recent_events_monitor(request: Request, limit: int = 100):
     store = request.app.state.event_store_service
     settings = request.app.state.settings
     events: List[Dict[str, Any]] = store.latest(limit=limit)
-    payloads = [_to_monitor_payload(settings.cluster_source_urn, e) for e in events]
+    payloads = [
+        p for e in events
+        if (p := _to_monitor_payload(settings.cluster_source_urn, e)) is not None
+    ]
     return {"events": payloads}
 
 

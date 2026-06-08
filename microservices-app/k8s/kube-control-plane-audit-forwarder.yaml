@@ -16,8 +16,10 @@ data:
       "/host/var/log/kubernetes/audit/audit.log*",
       "/host/var/log/audit.log"
     ]
-    read_from = "beginning"
-    ignore_older_secs = 0
+    # Tail live apiserver audit lines only. "beginning" replays the full log and delays
+    # recent kubectl commands (create/get/delete secret) by hours in the UI.
+    read_from = "end"
+    ignore_older_secs = 86400
 
     [transforms.to_bulk]
     type = "remap"
@@ -168,7 +170,11 @@ data:
     batch.max_events = 10
     batch.timeout_secs = 2
     request.timeout_secs = 10
-    healthcheck.enabled = false
+    request.retry_attempts = 10
+    request.retry_initial_backoff_secs = 1
+    request.retry_max_duration_secs = 300
+    healthcheck.enabled = true
+    healthcheck.uri = "http://audit-service.ecommerce.svc.cluster.local:8005/health"
 
     # ── Loki sink — feeds Grafana Cloud dashboards ────────────────────────────
     [sinks.loki]
@@ -189,15 +195,17 @@ data:
     tenant_id = "${GRAFANA_CLOUD_LOKI_USERNAME}"
 
     # ── OpenSearch sink — feeds OpenSearch Dashboards ──────────────────────────
-    [sinks.opensearch]
-    type = "elasticsearch"
-    inputs = ["only_valid_k8s_audit"]
-    endpoints = ["http://opensearch.ecommerce.svc.cluster.local:9200"]
-    bulk.index = "k8s-audit-%Y.%m.%d"
-    batch.max_events = 20
-    batch.timeout_secs = 3
-    request.timeout_secs = 10
-    healthcheck.enabled = false
+    # OpenSearch disabled when the pod is down — retries were stalling the forwarder.
+    # Re-enable after: kubectl wait -n ecommerce --for=condition=ready pod -l app=opensearch --timeout=120s
+    # [sinks.opensearch]
+    # type = "elasticsearch"
+    # inputs = ["only_response_complete"]
+    # endpoints = ["http://opensearch.ecommerce.svc.cluster.local:9200"]
+    # bulk.index = "k8s-audit-%Y.%m.%d"
+    # batch.max_events = 20
+    # batch.timeout_secs = 3
+    # request.timeout_secs = 10
+    # healthcheck.enabled = false
 
 ---
 apiVersion: apps/v1
@@ -280,6 +288,17 @@ spec:
               readOnly: true
             - name: vector-data
               mountPath: /var/lib/vector
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  test -f /var/lib/vector/k8s_audit_file/checkpoints.json || exit 1
+                  find /var/lib/vector/k8s_audit_file/checkpoints.json -mmin -15 | grep -q .
+            initialDelaySeconds: 180
+            periodSeconds: 120
+            failureThreshold: 2
           resources:
             requests:
               cpu: "50m"

@@ -55,10 +55,12 @@ echo [8/8] Generating "Notice: System info discovery" ...
 echo.
 echo =======================================================
 echo MASSIVE ATTACK SIMULATION COMPLETE!
-echo Falco has captured dozens of events across all rules.
+echo Falco should capture these if minikube uses hyperv or
+echo virtualbox (real Linux kernel). docker/WSL2: only network
+echo rules fire — use SET MINIKUBE_DRIVER=hyperv and re-run
+echo run-project.bat for full Falco coverage.
 echo.
-echo Please wait 15 seconds for LogQL to process everything,
-echo then refresh the Grafana "Falco Runtime Security" Dashboard!
-echo The charts will now be densely populated with data.
+echo Wait ~15s then refresh Monitor UI (Classification falco_*)
+echo   http://127.0.0.1:18015/control-plane/ui
 echo =======================================================
 pause
