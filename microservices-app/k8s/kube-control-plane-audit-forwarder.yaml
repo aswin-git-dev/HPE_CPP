@@ -20,6 +20,7 @@ data:
     # recent kubectl commands (create/get/delete secret) by hours in the UI.
     read_from = "end"
     ignore_older_secs = 86400
+    max_line_bytes = 1048576
 
     [transforms.to_bulk]
     type = "remap"
@@ -176,14 +177,69 @@ data:
     healthcheck.enabled = true
     healthcheck.uri = "http://audit-service.ecommerce.svc.cluster.local:8005/health"
 
+    [transforms.enrich_exec_for_loki]
+    type = "remap"
+    inputs = ["only_valid_k8s_audit"]
+    source = '''
+      # Default labels
+      .source = "audit"
+      .source_type = "k8s_audit"
+      .rule = "k8s_audit"
+      .severity = "info"
+
+      # Check if this is an exec/attach/portforward event
+      subresource = ""
+      if is_object(.event.objectRef) {
+        subresource = to_string(.event.objectRef.subresource) ?? ""
+      }
+      uri = downcase(to_string(.event.requestURI) ?? "")
+      
+      if subresource == "exec" || subresource == "attach" || subresource == "portforward" || contains(uri, "/exec") || contains(uri, "/attach") || contains(uri, "/portforward") {
+        .source = "falco-exec-audit"
+        
+        # Parse command from requestURI query parameters
+        hay = downcase(uri)
+        if contains(hay, "etc/shadow") || contains(hay, "etc/sudoers") || contains(hay, "etc/passwd") {
+          .rule = "Read sensitive file"
+          .severity = "critical"
+        } else if contains(hay, "aws/credentials") || contains(hay, "google_compute_engine") {
+          .rule = "Searched AWS credentials"
+          .severity = "critical"
+        } else if contains(hay, ".ssh") || contains(hay, "etc/ssh") {
+          .rule = "Read SSH information"
+          .severity = "critical"
+        } else if contains(hay, "hacked_config") || contains(hay, "malicious_startup") || contains(hay, "touch%20/etc") || contains(hay, "mkdir%20/etc") {
+          .rule = "Wrote under etc"
+          .severity = "warning"
+        } else if contains(hay, "nc") || contains(hay, "cpuminer") || contains(hay, "touch%20/bin") || contains(hay, "touch%20/usr/local/bin") {
+          .rule = "Wrote binary directory"
+          .severity = "warning"
+        } else if contains(hay, "apk%20add") || contains(hay, "apt-get%20install") || contains(hay, "yum%20install") {
+          .rule = "Ran package manager"
+          .severity = "warning"
+        } else if contains(hay, "sh") || contains(hay, "bash") {
+          .rule = "Spawned interactive shell"
+          .severity = "notice"
+        } else if contains(hay, "uname") {
+          .rule = "Collected system information"
+          .severity = "notice"
+        } else {
+          .rule = "Container exec"
+          .severity = "info"
+        }
+      }
+    '''
+
     # ── Loki sink — feeds Grafana Cloud dashboards ────────────────────────────
     [sinks.loki]
     type = "loki"
-    inputs = ["only_valid_k8s_audit"]
+    inputs = ["enrich_exec_for_loki"]
     endpoint = "${GRAFANA_CLOUD_LOKI_URL}"
     encoding.codec = "json"
-    labels.source_type = "k8s_audit"
-    labels.source = "audit"
+    labels.source_type = "{{ source_type }}"
+    labels.source = "{{ source }}"
+    labels.rule = "{{ rule }}"
+    labels.severity = "{{ severity }}"
     labels.verb = "{{ event.verb }}"
     labels.resource = "{{ event.objectRef.resource }}"
     batch.max_events = 20

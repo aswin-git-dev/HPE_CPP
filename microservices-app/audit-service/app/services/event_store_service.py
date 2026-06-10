@@ -23,10 +23,14 @@ class EventStoreService:
     the in-memory buffer (up to ``max_events`` most recent).
     """
 
-    # No-pod Falco events (bare container / host processes, e.g. python3.11
-    # multiprocessing) with the same classification are deduplicated within this
-    # window to stop them flooding the ring buffer and evicting real audit events.
+    # Only the known high-volume network rule is deduplicated to prevent it
+    # flooding the ring buffer and evicting real security alerts.
+    # All other Falco events (even without pod/namespace context) are always stored.
     _FALCO_NOISY_DEDUP_WINDOW_S: int = 30
+    _FALCO_NOISY_RULES: frozenset = frozenset({
+        "falco_contact_k8s_api_server_from_container",
+        "falco_contact_k8_s_api_server_from_container",
+    })
 
     def __init__(
         self,
@@ -112,21 +116,20 @@ class EventStoreService:
     # ── Public API ───────────────────────────────────────────────────────────
 
     def index_event(self, event: Dict[str, Any]) -> None:
-        # Deduplicate noisy no-pod Falco events (e.g. python3.11 multiprocessing
-        # repeatedly triggering "Contact K8S API Server From Container").
-        # Events with a real namespace or pod_name are never deduplicated.
-        if (
-            event.get("source_type") == "falco"
-            and not event.get("namespace")
-            and not event.get("pod_name")
-        ):
-            cls_key = event.get("classification") or "falco"
-            now = time.monotonic()
-            with self._lock:
-                last = self._falco_noisy_seen.get(cls_key, 0.0)
-                if now - last < self._FALCO_NOISY_DEDUP_WINDOW_S:
-                    return  # drop duplicate
-                self._falco_noisy_seen[cls_key] = now
+        # Only deduplicate the known high-volume noisy rule
+        # "Contact K8S API Server From Container" which fires continuously
+        # from python3.11 multiprocessing and would flood the ring buffer.
+        # All other Falco events — including those without pod/namespace context
+        # (common on Docker/WSL2 where eBPF metadata is unavailable) — are stored.
+        if event.get("source_type") == "falco":
+            cls_key = event.get("classification") or ""
+            if cls_key in self._FALCO_NOISY_RULES:
+                now = time.monotonic()
+                with self._lock:
+                    last = self._falco_noisy_seen.get(cls_key, 0.0)
+                    if now - last < self._FALCO_NOISY_DEDUP_WINDOW_S:
+                        return  # drop this specific noisy rule only
+                    self._falco_noisy_seen[cls_key] = now
 
         with self._lock:
             row = dict(event)
