@@ -170,34 +170,41 @@ data:
     request.timeout_secs = 10
     healthcheck.enabled = false
 
-    # ── Loki sink — feeds Grafana Cloud dashboards ────────────────────────────
-    [sinks.loki]
-    type = "loki"
-    inputs = ["only_valid_k8s_audit"]
-    endpoint = "${GRAFANA_CLOUD_LOKI_URL}"
-    encoding.codec = "json"
-    labels.source_type = "k8s_audit"
-    labels.source = "audit"
-    labels.verb = "{{ event.verb }}"
-    labels.resource = "{{ event.objectRef.resource }}"
-    batch.max_events = 20
-    batch.timeout_secs = 3
-    healthcheck.enabled = false
-    auth.strategy = "basic"
-    auth.user = "${GRAFANA_CLOUD_LOKI_USERNAME}"
-    auth.password = "${GRAFANA_CLOUD_LOKI_PASSWORD}"
-    tenant_id = "${GRAFANA_CLOUD_LOKI_USERNAME}"
+    # # ── Loki sink — feeds Grafana Cloud dashboards ────────────────────────────
+    # [sinks.loki]
+    # type = "loki"
+    # inputs = ["only_valid_k8s_audit"]
+    # endpoint = "${GRAFANA_CLOUD_LOKI_URL}"
+    # encoding.codec = "json"
+    # labels.source_type = "k8s_audit"
+    # labels.source = "audit"
+    # labels.verb = "{{ event.verb }}"
+    # labels.resource = "{{ event.objectRef.resource }}"
+    # batch.max_events = 20
+    # batch.timeout_secs = 3
+    # healthcheck.enabled = false
+    # auth.strategy = "basic"
+    # auth.user = "${GRAFANA_CLOUD_LOKI_USERNAME}"
+    # auth.password = "${GRAFANA_CLOUD_LOKI_PASSWORD}"
+    # tenant_id = "${GRAFANA_CLOUD_LOKI_USERNAME}"
 
-    # ── OpenSearch sink — feeds OpenSearch Dashboards ──────────────────────────
-    [sinks.opensearch]
-    type = "elasticsearch"
+    # # ── OpenSearch sink — feeds OpenSearch Dashboards ──────────────────────────
+    # [sinks.opensearch]
+    # type = "elasticsearch"
+    # inputs = ["only_valid_k8s_audit"]
+    # endpoints = ["http://opensearch.ecommerce.svc.cluster.local:9200"]
+    # bulk.index = "k8s-audit-%Y.%m.%d"
+    # batch.max_events = 20
+    # batch.timeout_secs = 3
+    # request.timeout_secs = 10
+    # healthcheck.enabled = false
+
+    [sinks.kafka_audit_raw]
+    type = "kafka"
     inputs = ["only_valid_k8s_audit"]
-    endpoints = ["http://opensearch.ecommerce.svc.cluster.local:9200"]
-    bulk.index = "k8s-audit-%Y.%m.%d"
-    batch.max_events = 20
-    batch.timeout_secs = 3
-    request.timeout_secs = 10
-    healthcheck.enabled = false
+    bootstrap_servers = "kafka.ecommerce.svc.cluster.local:29092"
+    topic = "k8s-audit-raw"
+    encoding.codec = "json"
 
 ---
 apiVersion: apps/v1

@@ -204,8 +204,8 @@ def _run_gru_retrain(data_path: str):
 def summary_24h():
     logs  = fs.get_recent_logs(limit=2000)
     total = len(logs)
-    high  = sum(1 for l in logs if (l.get("anomaly_score") or 0) > 0.8)
-    med   = sum(1 for l in logs if 0.5 < (l.get("anomaly_score") or 0) <= 0.8)
+    high  = sum(1 for l in logs if (l.get("anomaly_score") or 0) > 0.9)
+    med   = sum(1 for l in logs if 0.6 < (l.get("anomaly_score") or 0) <= 0.9)
     low   = total - high - med
     users = {l["user"] for l in logs if l.get("user")}
     top_anomalies = sorted(

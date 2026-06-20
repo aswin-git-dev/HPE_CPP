@@ -5,10 +5,6 @@ WORKDIR /app
 
 # Copy and install Python deps (wheels only — no apt, works when Docker DNS cannot reach Debian mirrors)
 COPY requirements.txt .
-<<<<<<< HEAD
-RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir -r requirements.txt
-COPY main.py site_favicon.py site.svg ./
-=======
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
@@ -25,10 +21,9 @@ COPY --from=base /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.
 COPY --from=base /usr/local/bin /usr/local/bin
 
 # Copy application source
-COPY main.py .
+COPY main.py site_favicon.py site.svg ./
 
 # Switch to non-root user
->>>>>>> service-mesh
 USER appuser
 
 # Expose service port

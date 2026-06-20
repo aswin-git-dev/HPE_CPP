@@ -139,8 +139,8 @@ _gru_reg = GRURegistry()
 
 
 def _risk_level(score: float) -> str:
-    if score > 0.8:   return "HIGH"
-    if score > 0.5:   return "MEDIUM"
+    if score > 0.9:   return "HIGH"
+    if score > 0.6:   return "MEDIUM"
     return "LOW"
 
 

@@ -1,7 +1,13 @@
 @echo off
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
-title microservices-Monitor — Runner
+
+for %%I in ("%~dp0..") do set "MICROSERVICES_DIR=%%~fI"
+for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
+set "ML_DIR=%PROJECT_ROOT%\ml-anomaly-service"
+set "ALERT_LOG=%ML_DIR%\alerts.log"
+
+title microservices-Monitor - Runner
 
 echo ============================================================
 echo  microservices-Monitor - K8s Runner
@@ -29,7 +35,7 @@ echo      OK.
 echo.
 
 REM ── 2. Start minikube (3 nodes: 1 control-plane + 2 workers) ────────────────
-echo [2/5] Starting minikube (3 nodes, 2 CPU / 2 GB each)...
+echo [2/5] Starting minikube (3 nodes, 2 CPU / 4 GB each)...
 echo      First run downloads kicbase image (~514 MB) - normal, be patient.
 REM  --- Point 4: On-disk apiserver audit log retention (rotation + TTL on disk) ---
 REM       maxsize = rotate when file reaches this many MB
@@ -40,7 +46,7 @@ minikube start ^
   --driver=docker ^
   --nodes=3 ^
   --cpus=2 ^
-  --memory=2048 ^
+  --memory=4096 ^
   --extra-config=apiserver.audit-policy-file=/var/lib/minikube/certs/audit-policy.yaml
 if errorlevel 1 (
   echo.
@@ -56,7 +62,7 @@ if !TOTAL_NODES! LSS 3 (
   echo.
   echo   *** WARNING: Only !TOTAL_NODES! node^(s^). Names minikube-m02 / minikube-m03 do NOT exist yet.
   echo       Why: If Minikube already existed as a single-node cluster, "minikube start --nodes=3"
-  echo            does NOT add extra workers — it keeps the old profile.
+  echo            does NOT add extra workers - it keeps the old profile.
   echo       Fix:  minikube delete
   echo             Then run this bat again ^(creates a fresh 3-node cluster^)
   echo       Or:   minikube node add --worker   ^(run twice; each can take several minutes^)
@@ -126,6 +132,26 @@ if not exist "%~dp0namespace.yaml" (
 )
 kubectl apply -f namespace.yaml
 timeout /t 2 /nobreak >nul
+
+echo.
+echo [Slack] Applying Slack webhook secret...
+
+if exist "%PROJECT_ROOT%\config\slack.env" (
+  for /f "tokens=1,* delims==" %%A in (%PROJECT_ROOT%\config\slack.env) do (
+    if /I "%%A"=="SLACK_WEBHOOK_URL" set "SLACK_WEBHOOK_URL=%%B"
+    if /I "%%A"=="ENABLE_SLACK_ALERTS" set "ENABLE_SLACK_ALERTS=%%B"
+  )
+
+  kubectl create secret generic slack-webhook-secret -n ecommerce ^
+    --from-literal=SLACK_WEBHOOK_URL="%SLACK_WEBHOOK_URL%" ^
+    --from-literal=ENABLE_SLACK_ALERTS="%ENABLE_SLACK_ALERTS%" ^
+    --dry-run=client -o yaml | kubectl apply -f -
+
+  echo      Slack webhook secret applied.
+) else (
+  echo      WARN: %PROJECT_ROOT%\config\slack.env not found. Slack alerts will be skipped.
+)
+
 kubectl apply -f network-policy.yaml
 kubectl apply -f mongo-deployment.yaml
 kubectl apply -f mongo-service.yaml
@@ -135,6 +161,18 @@ REM loki.yaml and grafana.yaml removed — using Grafana Cloud instead
 kubectl apply -f grafana-cloud-secret.yaml
 kubectl apply -f audit-service.yaml
 kubectl apply -f vector.yaml
+kubectl apply -f kafka.yaml
+kubectl apply -f allow-kafka.yaml
+kubectl apply -f allow-falco-to-kafka.yaml
+
+echo      Waiting for Kafka rollout...
+kubectl rollout status -n ecommerce deployment/kafka --timeout=180s
+
+echo      Creating Kafka topics...
+kubectl exec -n ecommerce deploy/kafka -- /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --create --if-not-exists --topic k8s-audit-raw --partitions 1 --replication-factor 1
+kubectl exec -n ecommerce deploy/kafka -- /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --create --if-not-exists --topic falco-alerts --partitions 1 --replication-factor 1
+echo      Kafka topics ready.
+
 kubectl apply -f kube-control-plane-audit-forwarder.yaml
 kubectl apply -f user-deployment.yaml
 kubectl apply -f user-service.yaml
@@ -154,6 +192,19 @@ kubectl delete job opensearch-ism-setup -n ecommerce >nul 2>&1
 kubectl apply -f opensearch-ism-job.yaml
 echo      Manifests applied (including OpenSearch, Grafana Cloud secret, ISM TTL).
 echo.
+
+echo.
+echo      Building event-processor image...
+pushd "%ML_DIR%"
+minikube image build -t event-processor:latest -f Dockerfile.event-processor .
+popd
+
+echo.
+echo [EVENT PROCESSOR] Deploying inside Kubernetes...
+kubectl apply -f event-processor.yaml
+kubectl rollout restart deployment/event-processor -n ecommerce
+kubectl rollout status deployment/event-processor -n ecommerce --timeout=180s
+echo      Event Processor is running inside Kubernetes.
 
 REM ── Build images (use GOTO not giant "else (" blocks — nested parens break cmd.exe) ──
 if /I "%SKIP_IMAGE_BUILD%"=="1" (
@@ -243,6 +294,7 @@ if errorlevel 1 (
 :after_audit_wait
 echo      Starting port-forwards in new windows (keep them open^)...
 echo      Retry script: port-forward-retry.cmd (ASCII - no UTF-8 dashes in console^)
+
 start "pf-audit"        cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n ecommerce        svc/audit-service        18015:8005
 timeout /t 1 /nobreak >nul
 start "pf-user"         cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n user-ns          svc/user-service         18100:80
@@ -255,12 +307,17 @@ start "pf-payment"      cmd /k call "%~dp0port-forward-retry.cmd" port-forward -
 timeout /t 1 /nobreak >nul
 start "pf-notification" cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n notification-ns  svc/notification-service 18104:80
 timeout /t 1 /nobreak >nul
-REM Grafana port-forward removed — using Grafana Cloud at https://securelogger.grafana.net
 start "pf-opensearch-ui" cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n ecommerce       svc/opensearch-dashboards 5601:5601
 
 timeout /t 1 /nobreak >nul
 
 taskkill /F /IM python.exe >nul 2>&1
+
+REM ── Portable project paths ───────────────────────────────────
+for %%I in ("%~dp0..") do set "MICROSERVICES_APP_DIR=%%~fI"
+for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
+set "ML_DIR=%PROJECT_ROOT%\ml-anomaly-service"
+set "ALERT_LOG=%ML_DIR%\alerts.log"
 
 REM ── Smart Security Pipeline: Kafka + OpenSearch + ML + Alerts ─────────────
 echo.
@@ -269,18 +326,25 @@ echo [Security Pipeline] Starting Kafka, OpenSearch, ML API, ML consumer and ale
 REM Stop old kubectl port-forward windows
 taskkill /F /IM kubectl.exe >nul 2>&1
 
-start "pf-kafka" cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n ecommerce svc/kafka 9092:9092
 
 REM OpenSearch API port-forward for storing ML scored events
 start "pf-opensearch-api" cmd /k call "%~dp0port-forward-retry.cmd" port-forward -n ecommerce svc/opensearch 9200:9200
 timeout /t 1 /nobreak >nul
 
-REM Start ML API
-start "ml-api" cmd /k "cd /d D:\HPE_CPP\ml-anomaly-service && call venv\Scripts\activate && python -m uvicorn main:app --host 0.0.0.0 --port 8000"
-timeout /t 5 /nobreak >nul
 
-REM Start Kafka ML consumer: Kafka -> ML -> OpenSearch -> Email Alert
-start "ml-consumer-alerts" cmd /k "cd /d D:\HPE_CPP\ml-anomaly-service && call venv\Scripts\activate && python kafka_ml_consumer.py"
+if not exist "%ML_DIR%\venv\Scripts\activate.bat" (
+  echo      WARN: ML venv missing. Run once:
+  echo        cd "%ML_DIR%"
+  echo        python -m venv venv
+  echo        venv\Scripts\pip install -r requirements.txt
+) else (
+  start "ml-api" cmd /k pushd "%ML_DIR%" ^&^& call venv\Scripts\activate ^&^& python -m uvicorn main:app --host 0.0.0.0 --port 8000
+
+  timeout /t 5 /nobreak >nul
+
+  start "event-processor-logs" cmd /k kubectl logs -n ecommerce deploy/event-processor -f
+)
+:after_ml_start
 
 echo      Security pipeline windows started.
 echo      Kafka: localhost:9092
@@ -296,7 +360,7 @@ if /I "%SKIP_FALCO%"=="1" (
 ) else (
   where helm >nul 2>&1 && (
     call "%~dp0install-falco.bat" NOPAUSE
-    if errorlevel 1 echo      NOTE: Falco Helm step failed — see messages above ^(kernel/driver or chart values^).
+    if errorlevel 1 echo      NOTE: Falco Helm step failed - see messages above ^(kernel/driver or chart values^).
   ) || echo      Skipped: helm not on PATH. Run install-falco.bat when Helm is installed.
 )
 
@@ -315,7 +379,7 @@ echo   [OpenSearch Dashboards] http://127.0.0.1:5601
 echo   [OpenSearch API]        http://127.0.0.1:9200
 echo   [ML API]                http://127.0.0.1:8000/docs
 echo   [Anomaly Index]         http://127.0.0.1:9200/security-anomalies/_search?pretty
-echo   [Alert Log]             D:\HPE_CPP\ml-anomaly-service\alerts.log
+echo   [Alert Log]              %ML_DIR%\alerts.log
 
 echo.
 echo   [User service]          http://127.0.0.1:18100
@@ -325,6 +389,7 @@ echo   [Payment service]       http://127.0.0.1:18103
 echo   [Notification service]  http://127.0.0.1:18104
 echo ============================================================
 echo.
+
 REM ── Auto-open ecommerce UI only (skip if SKIP_BROWSER=1) ─────────────────
 if /I "%SKIP_BROWSER%"=="1" (
   echo      SKIP_BROWSER=1 - skipping auto-open.
@@ -333,10 +398,13 @@ if /I "%SKIP_BROWSER%"=="1" (
 
 echo   [SecureShop Ecommerce]  http://127.0.0.1:18000/ecommerce.html
 
-start "ecommerce-ui" cmd /k "cd /d D:\HPE_CPP\microservices-app && python -m http.server 18000"
+if not exist "%MICROSERVICES_DIR%\ecommerce.html" (
+  echo ERROR: ecommerce.html not found at "%MICROSERVICES_DIR%"
+  goto skip_browser
+)
+
+start "ecommerce-ui" cmd /k pushd "%MICROSERVICES_DIR%" ^&^& python -m http.server 18000
 start "" "http://127.0.0.1:18000/ecommerce.html"
-
-
 
 REM return back to k8s folder
 cd /d "%~dp0"

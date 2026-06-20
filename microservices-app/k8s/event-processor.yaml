@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-processor
+  namespace: ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: event-processor
+  template:
+    metadata:
+      labels:
+        app: event-processor
+    spec:
+      containers:
+        - name: event-processor
+          image: event-processor:latest
+          imagePullPolicy: Never
+          env:
+            - name: KAFKA_BOOTSTRAP
+              value: "kafka.ecommerce.svc.cluster.local:29092"
+            - name: MIN_ALERT_SCORE
+              value: "0.95"
+
+            - name: ML_API_URL
+              value: "http://host.minikube.internal:8000/score"
+
+            - name: OPENSEARCH_URL
+              value: "http://opensearch.ecommerce.svc.cluster.local:9200"
+
+            - name: OPENSEARCH_INDEX
+              value: "security-anomalies"
+
+            - name: ENABLE_SLACK_ALERTS
+              value: "true"
+
+            - name: SLACK_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: slack-webhook-secret
+                  key: SLACK_WEBHOOK_URL

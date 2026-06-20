@@ -270,7 +270,7 @@ def get_recent_logs(limit: int = 200, risk_level: str = None) -> list:
     conn = _get_conn()
     if risk_level:
         # We store anomaly_score; compute risk_level on the fly
-        score_threshold = {"HIGH": 0.8, "MEDIUM": 0.5, "LOW": 0.0}.get(risk_level.upper(), 0.0)
+        score_threshold = {"HIGH": 0.9, "MEDIUM": 0.6, "LOW": 0.0}.get(risk_level.upper(), 0.0)
         rows = conn.execute("""
             SELECT * FROM events
             WHERE anomaly_score >= ?
