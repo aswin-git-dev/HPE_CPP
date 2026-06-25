@@ -226,48 +226,118 @@ def features_to_vector(feat_dict: dict) -> list:
     return [feat_dict[col] for col in FEATURE_COLS]
 
 
+# ── Actor classification constants ───────────────────────────────────────────
+# Data-driven approach — no hardcoded prefix lists to maintain.
+# Any actor averaging more than this per day is treated as automated.
+# Justification: observed bimodal distribution in cluster data shows
+# human actors cluster below 100/day, automated actors above 200/day.
+AUTOMATED_ACTOR_DAILY_THRESHOLD = 200
+
+# Burst detection parameters — only applied to human-scale actors.
+HUMAN_BURST_MULTIPLIER     = 10   # flag if today is 10x the daily avg
+HUMAN_MAX_DAILY_FOR_BURST  = 500  # skip burst check if avg already high
+
+
+def _is_automated_actor(user: str, daily_avg: float) -> bool:
+    """
+    Returns True if this actor behaves like an automated system component.
+    Two signals — either one is sufficient:
+      1. Name starts with 'system:' — kubelet, controllers, built-in accounts.
+         Catches all system actors on day 1 before they have any history.
+      2. daily_avg > 200 — high frequency means automated, regardless of name.
+         Catches new service accounts (order-service, prometheus, etc.)
+         automatically after a few days, with no list to maintain.
+    """
+    if user.startswith("system:"):
+        return True
+    if daily_avg > AUTOMATED_ACTOR_DAILY_THRESHOLD:
+        return True
+    return False
+
+
 def generate_reason(parsed: dict, user_hist: dict, ip_hist: dict,
                     anomaly_score: float) -> str:
     """
     Human-readable explanation of WHY this event is suspicious.
-    In a full system this is where you'd call SHAP to get the actual
-    features that drove the Isolation Forest score. For now, rule-based
-    over the features we computed.
+    Rule-based over the 29 features we computed.
+    Thresholds are tuned for a Kubernetes cluster with mixed
+    human and automated actors (kubelet, controllers, service accounts).
     """
     reasons = []
+    user = parsed.get("user", "")
 
+    # Pre-compute burst fields needed for actor classification
+    req_24h   = user_hist.get("hist_req_24h", 0)
+    req_30d   = user_hist.get("hist_req_30d", 0)
+    daily_avg = req_30d / 30 if req_30d > 0 else 0
+
+    is_automated = _is_automated_actor(user, daily_avg)
+
+    # ── 1. Sensitive resource accessed outside business hours ─────────────
+    # Applies to all actors — even a controller touching secrets at 2AM
+    # after weeks of only doing so during business hours is suspicious.
     if parsed["is_sensitive"] and (parsed["hour"] < 6 or parsed["hour"] > 20):
-        reasons.append(f"sensitive resource '{parsed['object_type']}' accessed outside business hours")
+        reasons.append(
+            f"sensitive resource '{parsed['object_type']}' "
+            f"accessed outside business hours"
+        )
 
+    # ── 2. Brand new actor ────────────────────────────────────────────────
+    # Applies to all actors — a new service account with zero history
+    # touching sensitive resources is always worth flagging.
     if user_hist.get("is_new_user"):
         reasons.append("actor has NO activity history in the last 30 days")
 
+    # ── 3. Brand new IP ───────────────────────────────────────────────────
     if ip_hist.get("is_new_ip"):
         reasons.append("source IP has never been seen before")
 
-    req_24h = user_hist.get("hist_req_24h", 0)
-    req_30d = user_hist.get("hist_req_30d", 0)
-    daily_avg = req_30d / 30 if req_30d > 0 else 0
-    if daily_avg > 0 and req_24h > daily_avg * 5:
+    # ── 4. Request burst — human-scale actors only ────────────────────────
+    # Skipped for automated actors (kubelet, controllers, service accounts)
+    # because their reconciliation loops always produce high call volumes.
+    # Only meaningful for human actors with a low stable baseline.
+    if (not is_automated
+            and daily_avg > 0
+            and daily_avg < HUMAN_MAX_DAILY_FOR_BURST
+            and req_24h > daily_avg * HUMAN_BURST_MULTIPLIER):
         reasons.append(
-            f"request burst: {req_24h} requests in 24h vs daily avg of {daily_avg:.0f}"
+            f"request burst: {req_24h} requests in 24h "
+            f"vs daily avg of {daily_avg:.0f}"
         )
 
-    if user_hist.get("hist_fail_ratio_7d", 0) > 0.3:
+    # ── 5. High failure rate ──────────────────────────────────────────────
+    # Automated actors get a relaxed threshold (50%) because controllers
+    # routinely receive 404s when watching resources that don't exist yet.
+    # Human actors are flagged at 30% — that level of failure is unusual.
+    fail_threshold = 0.5 if is_automated else 0.3
+    if user_hist.get("hist_fail_ratio_7d", 0) > fail_threshold:
         reasons.append(
-            f"high failure rate: {user_hist['hist_fail_ratio_7d']*100:.0f}% of requests failing"
+            f"high failure rate: "
+            f"{user_hist['hist_fail_ratio_7d'] * 100:.0f}% of requests failing"
         )
 
+    # ── 6. High-risk method on sensitive resource ─────────────────────────
+    # Applies to all actors — no automated actor should be patching
+    # secrets or deleting clusterroles unexpectedly.
     if parsed["method"] in HIGH_RISK_METHODS and parsed["is_sensitive"]:
         reasons.append(
             f"high-risk method '{parsed['method']}' on sensitive resource"
         )
 
-    if ip_hist.get("hist_ip_unique_users", 0) > 10:
+    # ── 7. IP shared by many different actors ─────────────────────────────
+    # Node IPs (e.g. 192.168.49.2) are shared across every system service
+    # account on that node, so automated actors get a much higher threshold.
+    # For human actors, 10 different users from one IP is genuinely unusual.
+    ip_user_threshold = 50 if is_automated else 10
+    if ip_hist.get("hist_ip_unique_users", 0) > ip_user_threshold:
         reasons.append(
-            f"source IP used by {ip_hist['hist_ip_unique_users']} different actors"
+            f"source IP used by "
+            f"{ip_hist['hist_ip_unique_users']} different actors"
         )
 
+    # ── Fallback ──────────────────────────────────────────────────────────
+    # The IF/GRU models flagged this as anomalous even though no single
+    # rule fired — the anomaly is in the combination of features.
     if not reasons:
         reasons.append("statistical outlier in learned behavior model")
 

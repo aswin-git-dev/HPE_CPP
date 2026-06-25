@@ -36,7 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import feature_store as fs
 from feature_engineer import (
-    parse_raw_log, engineer_features, features_to_vector
+    parse_raw_log, engineer_features, features_to_vector, FEATURE_COLS
 )
 
 # CRITICAL: pickle.load() needs GRUModel and GRULayer to be importable.
@@ -105,7 +105,7 @@ def load_features_from_db():
             feats     = engineer_features(parsed, user_hist, ip_hist)
             vec       = features_to_vector(feats)
         except Exception:
-            vec = [0.0] * 27
+            vec = [0.0] * len(FEATURE_COLS)
         rows.append({"ts": row["ts"], "user": row["user"], "vec": vec})
 
     return rows

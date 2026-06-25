@@ -1,6 +1,6 @@
 {
-  "version": "v20260530_014414",
-  "model_file": "gru_v20260530_014414.pkl",
-  "scaler_file": "gru_scaler_v20260530_014414.pkl",
-  "meta_file": "gru_meta_v20260530_014414.json"
+  "version": "v20260625_191044",
+  "model_file": "gru_v20260625_191044.pkl",
+  "scaler_file": "gru_scaler_v20260625_191044.pkl",
+  "meta_file": "gru_meta_v20260625_191044.json"
 }

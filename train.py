@@ -34,6 +34,7 @@ from feature_engineer import (
     parse_raw_log, engineer_features, features_to_vector,
     FEATURE_COLS, generate_reason
 )
+from thresholds import THRESHOLD_HIGH, THRESHOLD_MEDIUM
 
 MODEL_DIR = os.environ.get("MODEL_DIR", "models")
 
@@ -44,9 +45,9 @@ def _model_version_tag() -> str:
 
 
 def _risk_level(score: float) -> str:
-    if score > 0.8:
+    if score > THRESHOLD_HIGH:
         return "HIGH"
-    elif score > 0.5:
+    elif score > THRESHOLD_MEDIUM:
         return "MEDIUM"
     return "LOW"
 

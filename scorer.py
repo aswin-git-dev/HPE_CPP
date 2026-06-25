@@ -19,6 +19,8 @@ import numpy as np
 import joblib
 from datetime import datetime, timezone
 from collections import defaultdict, deque
+from thresholds import THRESHOLD_HIGH, THRESHOLD_MEDIUM
+from spot_threshold import update_spot, get_risk_level, get_spot_status
 
 import feature_store as fs
 from feature_engineer import (
@@ -137,13 +139,6 @@ class GRURegistry:
 _if_reg  = IFRegistry()
 _gru_reg = GRURegistry()
 
-
-def _risk_level(score: float) -> str:
-    if score > 0.8:   return "HIGH"
-    if score > 0.5:   return "MEDIUM"
-    return "LOW"
-
-
 def score_event(raw_log: dict) -> dict:
     """
     Score a single raw log event using IF + GRU (if available).
@@ -193,31 +188,57 @@ def score_event(raw_log: dict) -> dict:
     else:
         combined = if_score   # fall back to IF-only until enough history
 
-    risk   = _risk_level(combined)
-    reason = generate_reason(parsed, user_hist, ip_hist, combined)
+    update_spot(combined)
+    risk        = get_risk_level(combined)
+    spot_status = get_spot_status()
+    reason      = generate_reason(parsed, user_hist, ip_hist, combined)
+
+    # Console log — shows SPOT threshold status on every scored event
+    if spot_status["warmed_up"]:
+        print(
+            f"[scorer] {parsed['ts']} | "
+            f"user={parsed['user'][:30]:<30} | "
+            f"score={combined:.4f} | "
+            f"risk={risk:<6} | "
+            f"SPOT HIGH={spot_status['threshold_high']:.4f} "
+            f"MEDIUM={spot_status['threshold_medium']:.4f} "
+            f"[dynamic | n={spot_status['n_total']}]"
+        )
+    else:
+        print(
+            f"[scorer] {parsed['ts']} | "
+            f"user={parsed['user'][:30]:<30} | "
+            f"score={combined:.4f} | "
+            f"risk={risk:<6} | "
+            f"SPOT warming up {spot_status['n_total']}/1000 "
+            f"[fallback HIGH={THRESHOLD_HIGH} MEDIUM={THRESHOLD_MEDIUM}]"
+        )
 
     # ── Record (AFTER scoring) ────────────────────────────────────────────
     fs.record_event(parsed, anomaly_score=combined,
                     model_version=_if_reg.version)
 
+    # REPLACE WITH
     return {
-        "ts":             parsed["ts"],
-        "user":           parsed["user"],
-        "source_ip":      parsed["source_ip"],
-        "namespace":      parsed["namespace"],
-        "object_type":    parsed["object_type"],
-        "method":         parsed["method"],
-        "anomaly_score":  round(combined, 4),
-        "if_score":       round(if_score, 4),
-        "gru_score":      round(gru_score, 4) if gru_score is not None else None,
-        "gru_active":     gru_active,
-        "risk_level":     risk,
-        "reason":         reason,
-        "model_version":  _if_reg.version,
-        "features":       {k: round(v, 4) if isinstance(v, float) else v
-                           for k, v in feats.items()},
+        "ts":                    parsed["ts"],
+        "user":                  parsed["user"],
+        "source_ip":             parsed["source_ip"],
+        "namespace":             parsed["namespace"],
+        "object_type":           parsed["object_type"],
+        "method":                parsed["method"],
+        "anomaly_score":         round(combined, 4),
+        "if_score":              round(if_score, 4),
+        "gru_score":             round(gru_score, 4) if gru_score is not None else None,
+        "gru_active":            gru_active,
+        "risk_level":            risk,
+        "reason":                reason,
+        "model_version":         _if_reg.version,
+        "spot_threshold_high":   round(spot_status["threshold_high"],   4),
+        "spot_threshold_medium": round(spot_status["threshold_medium"], 4),
+        "spot_mode":             spot_status["mode"],
+        "features":              {k: round(v, 4) if isinstance(v, float) else v
+                                  for k, v in feats.items()},
     }
-
 
 def score_batch(raw_logs: list) -> list:
     """Score a list in chronological order — no leakage."""

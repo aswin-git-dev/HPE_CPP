@@ -29,6 +29,7 @@ import feature_store as fs
 from scorer import score_event, score_batch, get_model_info
 from retrain import retrain
 import llm_engine as llm
+from thresholds import THRESHOLD_HIGH, THRESHOLD_MEDIUM
 
 app = FastAPI(
     title="K8s Security Anomaly Detection",
@@ -204,12 +205,12 @@ def _run_gru_retrain(data_path: str):
 def summary_24h():
     logs  = fs.get_recent_logs(limit=2000)
     total = len(logs)
-    high  = sum(1 for l in logs if (l.get("anomaly_score") or 0) > 0.8)
-    med   = sum(1 for l in logs if 0.5 < (l.get("anomaly_score") or 0) <= 0.8)
+    high  = sum(1 for l in logs if (l.get("anomaly_score") or 0) > THRESHOLD_HIGH)
+    med   = sum(1 for l in logs if THRESHOLD_MEDIUM < (l.get("anomaly_score") or 0) <= THRESHOLD_HIGH)
     low   = total - high - med
     users = {l["user"] for l in logs if l.get("user")}
     top_anomalies = sorted(
-        [l for l in logs if (l.get("anomaly_score") or 0) > 0.5],
+        [l for l in logs if (l.get("anomaly_score") or 0) > THRESHOLD_MEDIUM],
         key=lambda x: x.get("anomaly_score", 0), reverse=True
     )[:10]
 
@@ -229,7 +230,7 @@ def summary_24h():
         user_events.setdefault(u, []).append(l)
     for u, evs in user_events.items():
         off_h = sum(1 for e in evs if e.get("hour", 12) < 6 or e.get("hour", 12) > 20)
-        high_r = sum(1 for e in evs if (e.get("anomaly_score") or 0) > 0.8)
+        high_r = sum(1 for e in evs if (e.get("anomaly_score") or 0) > THRESHOLD_HIGH)
         if off_h > 0 and high_r > 0:
             uba_flags.append({"user": u, "off_hours_events": off_h, "high_risk_events": high_r})
     digest["uba_flags"] = sorted(uba_flags, key=lambda x: x["high_risk_events"], reverse=True)[:5]

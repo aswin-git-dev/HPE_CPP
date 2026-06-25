@@ -168,14 +168,15 @@ class GRULayer:
 
     def adam_update(self, grads, lr=0.001, beta1=0.9, beta2=0.999, eps=1e-8):
         self.t += 1
-        for k in self._params():
+        # Iterate over (name, actual_array) pairs directly.
+        # self._params()[k] -= ... creates a throwaway dict each call — the
+        # original arrays are never modified. Instead, mutate the arrays in-place.
+        for k, param in [("Wih", self.Wih), ("Whh", self.Whh), ("b", self.b)]:
             self.m[k] = beta1 * self.m[k] + (1 - beta1) * grads[k]
             self.v[k] = beta2 * self.v[k] + (1 - beta2) * grads[k] ** 2
             m_hat = self.m[k] / (1 - beta1 ** self.t)
             v_hat = self.v[k] / (1 - beta2 ** self.t)
-            self._params()[k] -= lr * m_hat / (np.sqrt(v_hat) + eps)
-        # Apply in-place
-        self.Wih -= 0   # params already updated via dict reference above
+            param -= lr * m_hat / (np.sqrt(v_hat) + eps)   # in-place on the real array
 
 
 class GRUModel:
@@ -322,7 +323,7 @@ def load_if_features_from_db():
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import feature_store as fs
     from feature_engineer import (
-        parse_raw_log, engineer_features, features_to_vector
+        parse_raw_log, engineer_features, features_to_vector, FEATURE_COLS
     )
 
     conn = sqlite3.connect(fs.DB_PATH)
@@ -349,7 +350,7 @@ def load_if_features_from_db():
             feats     = engineer_features(parsed, user_hist, ip_hist)
             vec       = features_to_vector(feats)
         except Exception:
-            vec = [0.0] * 27
+            vec = [0.0] * len(FEATURE_COLS)
         rows.append({"ts": row["ts"], "user": row["user"], "vec": vec})
 
     return rows
