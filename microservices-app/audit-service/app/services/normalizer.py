@@ -392,6 +392,19 @@ class Normalizer:
         if payload.fields:
             merged_fields = {**merged_fields, **payload.fields}
 
+        if not ns:
+            ns = merged_fields.get("k8s.ns.name")
+        if not pod:
+            pod = merged_fields.get("k8s.pod.name")
+
+        resource_name = None
+        if payload.container and payload.container.name:
+            resource_name = payload.container.name
+        elif "container.name" in merged_fields:
+            resource_name = merged_fields["container.name"]
+        elif "proc.name" in merged_fields:
+            resource_name = merged_fields["proc.name"]
+
         normalized: Dict[str, Any] = {
             "event_id": "",
             "timestamp": ts,
@@ -417,7 +430,7 @@ class Normalizer:
             "action": None,
             "resource": "runtime",
             "subresource": None,
-            "resource_name": payload.container.name if payload.container else None,
+            "resource_name": resource_name,
             "api_group": None,
             "api_version": None,
             "status_code": None,

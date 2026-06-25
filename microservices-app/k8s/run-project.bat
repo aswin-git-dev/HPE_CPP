@@ -158,7 +158,19 @@ kubectl apply -f mongo-service.yaml
 kubectl apply -f opensearch.yaml
 kubectl apply -f opensearch-dashboards.yaml
 REM loki.yaml and grafana.yaml removed — using Grafana Cloud instead
-kubectl apply -f grafana-cloud-secret.yaml
+echo [Grafana] Applying Grafana Cloud Loki credentials...
+if exist "%~dp0.env" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0apply-grafana-cloud-secret.ps1"
+  if errorlevel 1 (
+    echo      WARN: apply-grafana-cloud-secret.ps1 failed - check k8s\.env has LOKI_INSTANCE_ID and GRAFANA_CLOUD_TOKEN
+  )
+) else if exist "%~dp0grafana-cloud-secret.yaml" (
+  kubectl apply -f grafana-cloud-secret.yaml
+) else (
+  echo      WARN: No k8s\.env and no grafana-cloud-secret.yaml - Vector cannot push to Grafana Cloud.
+  echo             Copy grafana-cloud-secret.yaml.example or add .env then re-run apply-grafana-cloud-secret.ps1
+)
+kubectl apply -f vector-rbac.yaml
 kubectl apply -f audit-service.yaml
 kubectl apply -f vector.yaml
 kubectl apply -f kafka.yaml

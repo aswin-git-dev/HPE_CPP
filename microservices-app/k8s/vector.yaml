@@ -140,9 +140,18 @@ data:
       if err == null && is_object(parsed) {
         . = parsed
       }
+      rule_name = to_string(.rule) ?? ""
+      priority_name = to_string(.priority) ?? ""
+      # Loki label slug (no regex — VRL regex is fragile inside embedded TOML).
+      .loki_rule = if rule_name != "" {
+        downcase(replace(rule_name, " ", "_"))
+      } else {
+        "unknown_rule"
+      }
       .source = "falco"
       .source_type = "falco"
-      # Grafana Cloud AI dashboard expects rule as a top-level field or in json payload
+      if rule_name != "" { .rule = rule_name }
+      if priority_name != "" { .priority = priority_name }
     '''
 
     [sinks.falco_loki]
@@ -152,6 +161,8 @@ data:
     encoding.codec = "json"
     labels.source = "falco"
     labels.source_type = "falco"
+    labels.rule = "{{ loki_rule }}"
+    labels.priority = "{{ priority }}"
     batch.max_events = 20
     batch.timeout_secs = 3
     healthcheck.enabled = false

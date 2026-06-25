@@ -13,6 +13,7 @@ from app.middleware.exception_handler import ExceptionHandlingMiddleware
 from app.middleware.request_context import RequestContextMiddleware
 from app.services import EventStoreService, K8sMonitorService, Normalizer, RetentionService, StatsService, TaggingService
 from app.services.opensearch_service import OpenSearchService
+from app.services.grafana_loki_service import GrafanaLokiService
 
 
 def create_app() -> FastAPI:
@@ -43,6 +44,7 @@ def create_app() -> FastAPI:
     )
     app.state.k8s_monitor_service = K8sMonitorService()
     app.state.opensearch_service = None
+    app.state.grafana_loki_service = GrafanaLokiService(settings)
 
     # Routes
     app.include_router(health_router)
@@ -67,6 +69,10 @@ def create_app() -> FastAPI:
             except Exception as e:
                 logger.warning("opensearch_init_failed: %s", e)
         app.state.opensearch_service = ost
+        if app.state.grafana_loki_service.ready:
+            logger.info("grafana_loki_forwarder_ready")
+        else:
+            logger.warning("grafana_loki_forwarder_disabled_missing_credentials")
 
         def _ttl_purge_loop(svc: OpenSearchService) -> None:
             if settings.opensearch_events_ttl_days <= 0:

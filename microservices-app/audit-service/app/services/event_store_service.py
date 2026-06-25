@@ -23,6 +23,15 @@ class EventStoreService:
     the in-memory buffer (up to ``max_events`` most recent).
     """
 
+    # Only the known high-volume network rule is deduplicated to prevent it
+    # flooding the ring buffer and evicting real security alerts.
+    # All other Falco events (even without pod/namespace context) are always stored.
+    _FALCO_NOISY_DEDUP_WINDOW_S: int = 30
+    _FALCO_NOISY_RULES: frozenset = frozenset({
+        "falco_contact_k8s_api_server_from_container",
+        "falco_contact_k8_s_api_server_from_container",
+    })
+
     def __init__(
         self,
         max_events: int = 5000,
@@ -34,6 +43,8 @@ class EventStoreService:
         self._ttl_seconds = ttl_seconds if ttl_seconds and ttl_seconds > 0 else 0
         self._persistent_path: Optional[Path] = None
         self._current_file_handle = None
+        # classification → last ingested monotonic (for no-pod Falco dedup)
+        self._falco_noisy_seen: Dict[str, float] = {}
 
         if persistent_path:
             p = Path(persistent_path)
@@ -105,6 +116,21 @@ class EventStoreService:
     # ── Public API ───────────────────────────────────────────────────────────
 
     def index_event(self, event: Dict[str, Any]) -> None:
+        # Only deduplicate the known high-volume noisy rule
+        # "Contact K8S API Server From Container" which fires continuously
+        # from python3.11 multiprocessing and would flood the ring buffer.
+        # All other Falco events — including those without pod/namespace context
+        # (common on Docker/WSL2 where eBPF metadata is unavailable) — are stored.
+        if event.get("source_type") == "falco":
+            cls_key = event.get("classification") or ""
+            if cls_key in self._FALCO_NOISY_RULES:
+                now = time.monotonic()
+                with self._lock:
+                    last = self._falco_noisy_seen.get(cls_key, 0.0)
+                    if now - last < self._FALCO_NOISY_DEDUP_WINDOW_S:
+                        return  # drop this specific noisy rule only
+                    self._falco_noisy_seen[cls_key] = now
+
         with self._lock:
             row = dict(event)
             row[_INGESTED] = time.monotonic()
@@ -123,8 +149,13 @@ class EventStoreService:
             items = list(self._events)
         if limit <= 0:
             return []
+        ranked = sorted(
+            items,
+            key=lambda e: str(e.get("timestamp") or ""),
+            reverse=True,
+        )
         out = []
-        for e in reversed(items[-limit:]):
+        for e in ranked[:limit]:
             out.append({k: v for k, v in e.items() if k != _INGESTED})
         return out
 

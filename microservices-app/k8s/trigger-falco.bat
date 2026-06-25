@@ -45,7 +45,7 @@ echo [6/8] Generating "Error: Read ssh information" ...
 %TARGET_PRODUCT% cat /root/.ssh/id_rsa >nul 2>&1
 %TARGET_ORDER% cat /etc/ssh/ssh_config >nul 2>&1
 
-echo [7/8] Generating "Critical: Find AWS/GCP Credentials" ...
+echo [7/8] Generating "Critical: Find cloud credentials" ...
 %TARGET_USER% cat /root/.aws/credentials >nul 2>&1
 %TARGET_PRODUCT% cat /root/.ssh/google_compute_engine >nul 2>&1
 
@@ -55,10 +55,12 @@ echo [8/8] Generating "Notice: System info discovery" ...
 echo.
 echo =======================================================
 echo MASSIVE ATTACK SIMULATION COMPLETE!
-echo Falco has captured dozens of events across all rules.
+echo Falco should capture these if minikube uses hyperv or
+echo virtualbox (real Linux kernel). docker/WSL2: only network
+echo rules fire — use SET MINIKUBE_DRIVER=hyperv and re-run
+echo run-project.bat for full Falco coverage.
 echo.
-echo Please wait 15 seconds for LogQL to process everything,
-echo then refresh the Grafana "Falco Runtime Security" Dashboard!
-echo The charts will now be densely populated with data.
+echo Wait ~15s then refresh Monitor UI (Classification falco_*)
+echo   http://127.0.0.1:18015/control-plane/ui
 echo =======================================================
 pause

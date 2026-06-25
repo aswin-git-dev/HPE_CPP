@@ -43,7 +43,7 @@ rules:
   # Pod exec / attach / port-forward (runtime interactive access)
   - level: Request
     stages: [RequestReceived, ResponseStarted, ResponseComplete]
-    verbs: [create]
+    verbs: [create, get]
     resources:
       - group: ""
         resources:

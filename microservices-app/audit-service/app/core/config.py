@@ -74,12 +74,38 @@ class Settings(BaseSettings):
         description="Interval for OpenSearch TTL purge when opensearch_events_ttl_days > 0.",
     )
 
+    # Grafana Cloud Loki — mirror Control Plane UI rows where resource=falco
+    grafana_loki_enabled: bool = Field(default=True)
+    grafana_loki_url: Optional[str] = Field(
+        default=None,
+        description="Grafana Cloud Loki base URL (https://logs-prod-xxx.grafana.net).",
+    )
+    grafana_loki_username: Optional[str] = Field(default=None, description="Grafana Cloud Loki instance ID.")
+    grafana_loki_password: Optional[str] = Field(default=None, description="Grafana Cloud access policy token.")
+    grafana_loki_timeout_s: int = Field(default=8, ge=1, le=60)
+
+    @property
+    def grafana_loki_push_url(self) -> Optional[str]:
+        if not self.grafana_loki_url:
+            return None
+        base = self.grafana_loki_url.rstrip("/")
+        if base.endswith("/loki/api/v1/push"):
+            return base
+        return f"{base}/loki/api/v1/push"
+
     # Observability
     enable_metrics: bool = Field(default=True)
 
     @field_validator("opensearch_user", "opensearch_password", mode="before")
     @classmethod
     def _empty_auth_none(cls, v: object) -> object:
+        if v == "":
+            return None
+        return v
+
+    @field_validator("grafana_loki_username", "grafana_loki_password", "grafana_loki_url", mode="before")
+    @classmethod
+    def _empty_grafana_none(cls, v: object) -> object:
         if v == "":
             return None
         return v

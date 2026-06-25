@@ -79,6 +79,24 @@ spec:
           value: "audit-events"
         - name: OPENSEARCH_EVENTS_TTL_DAYS
           value: "15"
+        # Grafana Cloud — forward UI resource=falco rows to Falco Security Alerts dashboard
+        - name: GRAFANA_LOKI_ENABLED
+          value: "true"
+        - name: GRAFANA_LOKI_URL
+          valueFrom:
+            secretKeyRef:
+              name: grafana-cloud-loki
+              key: LOKI_URL
+        - name: GRAFANA_LOKI_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: grafana-cloud-loki
+              key: LOKI_USERNAME
+        - name: GRAFANA_LOKI_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: grafana-cloud-loki
+              key: LOKI_PASSWORD
         volumeMounts:
         - name: audit-data
           mountPath: /data/audit-events

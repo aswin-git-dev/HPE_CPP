@@ -27,6 +27,20 @@ def _index_opensearch(request: Request, retained: Dict[str, Any]) -> None:
         )
 
 
+def _forward_falco_to_grafana(request: Request, retained: Dict[str, Any]) -> None:
+    loki = getattr(request.app.state, "grafana_loki_service", None)
+    if loki is None or not loki.ready:
+        return
+    settings = request.app.state.settings
+    try:
+        loki.forward_falco_dashboard_event(retained, settings.cluster_source_urn)
+    except Exception:
+        logger.exception(
+            "grafana_loki_forward_failed",
+            extra={"event_id": retained.get("event_id"), "source_type": retained.get("source_type")},
+        )
+
+
 class BulkEvent(BaseModel):
     source_type: Literal["app", "k8s_audit", "falco"]
     event: Dict[str, Any]
@@ -46,6 +60,7 @@ def _process_and_store(request: Request, normalized: Dict[str, Any]) -> bool:
     try:
         store.index_event(retained)
         _index_opensearch(request, retained)
+        _forward_falco_to_grafana(request, retained)
         # update stats using the original normalized values (before retention removal)
         stats.record_processed(SourceType(normalized["source_type"]), severity=_coerce_sev(normalized.get("severity")))
         return True

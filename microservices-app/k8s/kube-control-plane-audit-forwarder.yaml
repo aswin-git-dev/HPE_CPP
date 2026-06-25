@@ -159,6 +159,18 @@ data:
     inputs = ["drop_kubelet_noise"]
     condition = '.event != null && .event.requestURI != null && .event.verb != "unknown"'
 
+    # Flatten verb/resource for Loki stream labels (Grafana audit dashboard).
+    [transforms.audit_loki_labels]
+    type = "remap"
+    inputs = ["only_valid_k8s_audit"]
+    source = '''
+      .loki_verb = to_string(.event.verb) ?? "unknown"
+      .loki_resource = ""
+      if is_object(.event.objectRef) {
+        .loki_resource = to_string(.event.objectRef.resource) ?? ""
+      }
+    '''
+
     [sinks.audit_service]
     type = "http"
     inputs = ["only_valid_k8s_audit"]
@@ -170,23 +182,23 @@ data:
     request.timeout_secs = 10
     healthcheck.enabled = false
 
-    # # ── Loki sink — feeds Grafana Cloud dashboards ────────────────────────────
-    # [sinks.loki]
-    # type = "loki"
-    # inputs = ["only_valid_k8s_audit"]
-    # endpoint = "${GRAFANA_CLOUD_LOKI_URL}"
-    # encoding.codec = "json"
-    # labels.source_type = "k8s_audit"
-    # labels.source = "audit"
-    # labels.verb = "{{ event.verb }}"
-    # labels.resource = "{{ event.objectRef.resource }}"
-    # batch.max_events = 20
-    # batch.timeout_secs = 3
-    # healthcheck.enabled = false
-    # auth.strategy = "basic"
-    # auth.user = "${GRAFANA_CLOUD_LOKI_USERNAME}"
-    # auth.password = "${GRAFANA_CLOUD_LOKI_PASSWORD}"
-    # tenant_id = "${GRAFANA_CLOUD_LOKI_USERNAME}"
+    # ── Loki sink — feeds Grafana Cloud audit dashboard ───────────────────────
+    [sinks.loki]
+    type = "loki"
+    inputs = ["audit_loki_labels"]
+    endpoint = "${GRAFANA_CLOUD_LOKI_URL}"
+    encoding.codec = "json"
+    labels.source_type = "k8s_audit"
+    labels.source = "audit"
+    labels.verb = "{{ loki_verb }}"
+    labels.resource = "{{ loki_resource }}"
+    batch.max_events = 20
+    batch.timeout_secs = 3
+    healthcheck.enabled = false
+    auth.strategy = "basic"
+    auth.user = "${GRAFANA_CLOUD_LOKI_USERNAME}"
+    auth.password = "${GRAFANA_CLOUD_LOKI_PASSWORD}"
+    tenant_id = "${GRAFANA_CLOUD_LOKI_USERNAME}"
 
     # # ── OpenSearch sink — feeds OpenSearch Dashboards ──────────────────────────
     # [sinks.opensearch]

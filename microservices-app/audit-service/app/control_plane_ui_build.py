@@ -132,7 +132,14 @@ def _transform_sample_to_production(html: str) -> str:
         return;
       }
     }
-    currentEvents=j.events||[];
+    // Merge new events into currentEvents rather than replacing, so previously
+    // visible events are not lost when they fall out of the latest-N fetch window.
+    const newBatch = j.events||[];
+    const existingIds = new Set(currentEvents.map(e=>e.id));
+    const added = newBatch.filter(e=>!existingIds.has(e.id));
+    currentEvents = [...currentEvents, ...added]
+      .sort((a,b)=>String(b.time||'').localeCompare(String(a.time||'')))
+      .slice(0, 2000);
     const resourceSel=document.getElementById('resourceFilter');
     if(resourceSel){
       const cur=resourceSel.value;
@@ -163,7 +170,14 @@ def _transform_sample_to_production(html: str) -> str:
       toast('Server returned 0 events — retaining last known data');
       return;
     }
-    currentEvents=j.events||[];
+    // Merge new events into currentEvents rather than replacing, so previously
+    // visible events are not lost when they fall out of the latest-N fetch window.
+    const newBatch = j.events||[];
+    const existingIds = new Set(currentEvents.map(e=>e.id));
+    const added = newBatch.filter(e=>!existingIds.has(e.id));
+    currentEvents = [...currentEvents, ...added]
+      .sort((a,b)=>String(b.time||'').localeCompare(String(a.time||'')))
+      .slice(0, 2000);
     const resourceSel=document.getElementById('resourceFilter');
     if(resourceSel){
       const cur=resourceSel.value;

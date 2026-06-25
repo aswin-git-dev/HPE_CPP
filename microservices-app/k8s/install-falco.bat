@@ -75,19 +75,33 @@ echo [Falco] Helm repo...
 "%HELM_CMD%" repo update
 if errorlevel 1 goto :fail
 
-echo [Falco] Loading .env for GRAFANA_CLOUD_TOKEN...
+echo [Falco] Loading .env for Grafana Cloud Loki...
 if exist "%~dp0.env" (
-  for /f "usebackq eol=# tokens=1,2 delims==" %%A in ("%~dp0.env") do (
+  for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%~dp0.env") do (
     if "%%A"=="GRAFANA_CLOUD_TOKEN" set "GRAFANA_CLOUD_TOKEN=%%B"
+    if "%%A"=="LOKI_INSTANCE_ID" set "LOKI_INSTANCE_ID=%%B"
+    if "%%A"=="LOKI_URL" set "LOKI_URL=%%B"
   )
 )
 
 if not defined GRAFANA_CLOUD_TOKEN (
   echo [WARNING] GRAFANA_CLOUD_TOKEN not found in .env. Falco Loki output may fail to authenticate.
 )
+if not defined LOKI_INSTANCE_ID (
+  echo [WARNING] LOKI_INSTANCE_ID not found in .env. Falcosidekick Loki user/tenant may be wrong.
+)
+if not defined LOKI_URL (
+  set "LOKI_URL=https://logs-prod-028.grafana.net"
+  echo [WARNING] LOKI_URL not in .env - using default %LOKI_URL%
+)
 
 echo [Falco] Installing/upgrading chart (may take several minutes)...
-"%HELM_CMD%" upgrade --install falco falcosecurity/falco -n falco -f "%~dp0falco-values.yaml" --set falcosidekick.config.loki.apikey="%GRAFANA_CLOUD_TOKEN%" --create-namespace --wait --timeout 15m
+"%HELM_CMD%" upgrade --install falco falcosecurity/falco -n falco -f "%~dp0falco-values.yaml" ^
+  --set falcosidekick.config.loki.apikey="%GRAFANA_CLOUD_TOKEN%" ^
+  --set falcosidekick.config.loki.user="%LOKI_INSTANCE_ID%" ^
+  --set falcosidekick.config.loki.tenant="%LOKI_INSTANCE_ID%" ^
+  --set falcosidekick.config.loki.hostport="%LOKI_URL%" ^
+  --create-namespace --wait --timeout 15m
 if errorlevel 1 goto :fail
 
 echo.
