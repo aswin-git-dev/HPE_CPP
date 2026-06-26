@@ -1,0 +1,26 @@
+MODEL COMPARISON REPORT
+Generated: 2026-06-25T20:43:05.100259+00:00
+Dataset:   6998 samples | anomaly rate: 15.0%
+Features:  29 behavioral features
+
+Model                        Type                          AUC     F1  Recall        Production?
+-----------------------------------------------------------------------------------------------
+XGBoost                      supervised                 1.0000 0.9910  0.9943  NO (needs labels)
+Random Forest                supervised                 0.9999 0.9856  0.9819  NO (needs labels)
+Autoencoder                  unsupervised               0.9586 0.2716  0.1574                YES
+GRU (sequential)             unsupervised-sequential    0.9529 0.7350  0.6260                YES
+Isolation Forest             unsupervised               0.9228 0.6410  0.6345                YES
+One-Class SVM                unsupervised               0.8491 0.5319  0.8158                YES
+Local Outlier Factor         unsupervised               0.5236 0.0000  0.0000                YES
+
+JUSTIFICATION FOR IF + GRU SELECTION:
+  1. Both work without labels at inference time (production requirement).
+  2. IF detects point anomalies; GRU detects temporal sequence anomalies.
+     They are complementary — 52 attacks caught by GRU that IF missed.
+  3. Supervised models (RF, XGBoost) cannot score unlabeled events.
+  4. One-Class SVM is sensitive to hyperparameter tuning and does not
+     scale well to 150,000+ events/day without kernel approximation.
+  5. LOF is not suitable for online/streaming use (no novelty detection
+     without novelty=True, and refit needed for each new event).
+  6. Autoencoder is unsupervised like IF but has no sequence awareness.
+     GRU strictly dominates it for temporal pattern detection.

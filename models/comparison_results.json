@@ -1,0 +1,86 @@
+{
+  "generated_at": "2026-06-25T20:43:05.100259+00:00",
+  "n_samples": 6998,
+  "n_features": 29,
+  "anomaly_rate": 0.1498,
+  "results": [
+    {
+      "model": "Isolation Forest",
+      "type": "unsupervised",
+      "auc_roc": 0.9228,
+      "precision": 0.6475,
+      "recall": 0.6345,
+      "f1": 0.641,
+      "threshold": 0.4,
+      "can_score_unlabeled": true,
+      "production_ready": true
+    },
+    {
+      "model": "One-Class SVM",
+      "type": "unsupervised",
+      "auc_roc": 0.8491,
+      "precision": 0.3946,
+      "recall": 0.8158,
+      "f1": 0.5319,
+      "threshold": 0.3,
+      "can_score_unlabeled": true,
+      "production_ready": true
+    },
+    {
+      "model": "Local Outlier Factor",
+      "type": "unsupervised",
+      "auc_roc": 0.5236,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "threshold": 0.5,
+      "can_score_unlabeled": true,
+      "production_ready": true
+    },
+    {
+      "model": "Autoencoder",
+      "type": "unsupervised",
+      "auc_roc": 0.9586,
+      "precision": 0.988,
+      "recall": 0.1574,
+      "f1": 0.2716,
+      "threshold": 0.3,
+      "can_score_unlabeled": true,
+      "production_ready": true
+    },
+    {
+      "model": "Random Forest",
+      "type": "supervised",
+      "auc_roc": 0.9999,
+      "precision": 0.9896,
+      "recall": 0.9819,
+      "f1": 0.9856,
+      "threshold": 0.5,
+      "can_score_unlabeled": false,
+      "production_ready": false
+    },
+    {
+      "model": "XGBoost",
+      "type": "supervised",
+      "auc_roc": 1.0,
+      "precision": 0.9877,
+      "recall": 0.9943,
+      "f1": 0.991,
+      "threshold": 0.5,
+      "can_score_unlabeled": false,
+      "production_ready": false
+    },
+    {
+      "model": "GRU (sequential)",
+      "type": "unsupervised-sequential",
+      "auc_roc": 0.9529,
+      "precision": 0.89,
+      "recall": 0.626,
+      "f1": 0.735,
+      "threshold": 0.3,
+      "can_score_unlabeled": true,
+      "production_ready": true,
+      "note": "Sequential model \u2014 activates after 20 events per user. Catches temporal patterns IF cannot detect."
+    }
+  ]
+}

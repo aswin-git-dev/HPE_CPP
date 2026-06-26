@@ -33,13 +33,58 @@ HASH_BUCKETS = {
 }
 
 # ── Sensitive resource keywords ───────────────────────────────────────────────
-SENSITIVE_RESOURCES = {"secret", "configmap", "clusterrole", "rolebinding", "pods/exec", "exec"}
+# Sources: NSA/CISA Kubernetes Hardening Guide (2022), MITRE ATT&CK for
+# Containers, CIS Kubernetes Benchmark v1.8
+SENSITIVE_RESOURCES = {
+    # Credentials and secrets
+    "secret",
+    "configmap",
+    # RBAC
+    "clusterrole",
+    "rolebinding",
+    # Execution
+    "pods/exec",
+    "exec",
+    "pods/portforward",
+    # Storage — data exfiltration vectors
+    "persistentvolume",
+    "persistentvolumeclaim",
+    # Admission control — attackers disable these to bypass security
+    "validatingwebhookconfiguration",
+    "mutatingwebhookconfiguration",
+    # Network control
+    "networkpolicy",
+    # Token and certificate operations
+    "tokenreview",
+    "certificatesigningrequest",
+    # Node-level access
+    "nodes/proxy",
+}
 
 # ── High-risk methods ─────────────────────────────────────────────────────────
-HIGH_RISK_METHODS = {"create", "delete", "patch", "update"}
+# Sources: MITRE ATT&CK T1098, CVE-2018-1002105, CIS Kubernetes Benchmark
+HIGH_RISK_METHODS = {
+    "create",
+    "delete",
+    "patch",
+    "update",
+    "deletecollection",   # bulk delete — evidence destruction
+    "bind",               # direct role binding — CVE-2018-1002105
+    "escalate",           # K8s privilege escalation verb
+    "impersonate",        # act as another identity — highest risk
+}
 
-# RBAC resource keywords
-RBAC_RESOURCES = {"role", "rolebinding", "clusterrole", "clusterrolebinding", "serviceaccount"}
+# ── RBAC resource keywords ────────────────────────────────────────────────────
+# Sources: Kubernetes RBAC documentation, NSA/CISA Hardening Guide Section 4
+RBAC_RESOURCES = {
+    "role",
+    "rolebinding",
+    "clusterrole",
+    "clusterrolebinding",
+    "serviceaccount",
+    "tokenrequest",        # SA token creation
+    "podsecuritypolicy",   # present in older clusters
+}
 
 # ── The canonical feature list — ORDER MATTERS ────────────────────────────────
 # This must be identical at training time and inference time.
@@ -172,12 +217,12 @@ def engineer_features(parsed: dict, user_hist: dict, ip_hist: dict) -> dict:
 
     feats = {
         # Hashed categoricals
-        "feat_user_hash":           _hash_feature(parsed["user"],       HASH_BUCKETS["user"]),
-        "feat_ip_hash":             _hash_feature(parsed["source_ip"],  HASH_BUCKETS["source_ip"]),
-        "feat_namespace_hash":      _hash_feature(parsed["namespace"],  HASH_BUCKETS["namespace"]),
-        "feat_object_type_hash":    _hash_feature(parsed["object_type"],HASH_BUCKETS["object_type"]),
-        "feat_method_hash":         _hash_feature(parsed["method"],     HASH_BUCKETS["method"]),
-        "feat_event_type_hash":     _hash_feature(parsed["event_type"], HASH_BUCKETS["event_type"]),
+        "feat_user_hash":           _hash_feature(parsed["user"],        HASH_BUCKETS["user"]),
+        "feat_ip_hash":             _hash_feature(parsed["source_ip"],   HASH_BUCKETS["source_ip"]),
+        "feat_namespace_hash":      _hash_feature(parsed["namespace"],   HASH_BUCKETS["namespace"]),
+        "feat_object_type_hash":    _hash_feature(parsed["object_type"], HASH_BUCKETS["object_type"]),
+        "feat_method_hash":         _hash_feature(parsed["method"],      HASH_BUCKETS["method"]),
+        "feat_event_type_hash":     _hash_feature(parsed["event_type"],  HASH_BUCKETS["event_type"]),
 
         # Temporal
         "feat_hour":                hour,
@@ -191,26 +236,26 @@ def engineer_features(parsed: dict, user_hist: dict, ip_hist: dict) -> dict:
         "feat_sensitive_offhour":   parsed["is_sensitive"] * is_off_hours,
 
         # Historical user features
-        "feat_hist_req_24h":             user_hist.get("hist_req_24h", 0),
-        "feat_hist_req_7d":              user_hist.get("hist_req_7d",  0),
-        "feat_hist_req_30d":             user_hist.get("hist_req_30d", 0),
-        "feat_hist_fail_ratio_7d":       user_hist.get("hist_fail_ratio_7d", 0.0),
+        "feat_hist_req_24h":             user_hist.get("hist_req_24h",           0),
+        "feat_hist_req_7d":              user_hist.get("hist_req_7d",            0),
+        "feat_hist_req_30d":             user_hist.get("hist_req_30d",           0),
+        "feat_hist_fail_ratio_7d":       user_hist.get("hist_fail_ratio_7d",     0.0),
         "feat_hist_unique_namespaces":   user_hist.get("hist_unique_namespaces", 0),
         "feat_hist_unique_resources":    user_hist.get("hist_unique_resources",  0),
-        "feat_hist_unique_ips":          user_hist.get("hist_unique_ips", 0),
+        "feat_hist_unique_ips":          user_hist.get("hist_unique_ips",        0),
         "feat_hist_sensitive_rate_7d":   user_hist.get("hist_sensitive_rate_7d", 0.0),
-        "feat_hist_user_hour_baseline":  user_hist.get("hist_user_hour_baseline", 0),
-        "feat_is_new_user":              user_hist.get("is_new_user", 1),
+        "feat_hist_user_hour_baseline":  user_hist.get("hist_user_hour_baseline",0),
+        "feat_is_new_user":              user_hist.get("is_new_user",            1),
 
         # Historical IP features
-        "feat_hist_ip_req_24h":          ip_hist.get("hist_ip_req_24h", 0),
-        "feat_hist_ip_fail_ratio_24h":   ip_hist.get("hist_ip_fail_ratio_24h", 0.0),
-        "feat_hist_ip_unique_users":     ip_hist.get("hist_ip_unique_users", 0),
-        "feat_is_new_ip":                ip_hist.get("is_new_ip", 1),
+        "feat_hist_ip_req_24h":          ip_hist.get("hist_ip_req_24h",         0),
+        "feat_hist_ip_fail_ratio_24h":   ip_hist.get("hist_ip_fail_ratio_24h",  0.0),
+        "feat_hist_ip_unique_users":     ip_hist.get("hist_ip_unique_users",     0),
+        "feat_is_new_ip":                ip_hist.get("is_new_ip",               1),
 
         # Burst + RBAC
-        "feat_fail_burst_5min":         ip_hist.get("hist_ip_fail_burst_5min", 0),
-        "feat_is_rbac_resource":        1 if any(r in parsed["object_type"] for r in RBAC_RESOURCES) else 0,
+        "feat_fail_burst_5min":    ip_hist.get("hist_ip_fail_burst_5min", 0),
+        "feat_is_rbac_resource":   1 if any(r in parsed["object_type"] for r in RBAC_RESOURCES) else 0,
     }
 
     # Sanity check: make sure no feature is missing
@@ -234,8 +279,8 @@ def features_to_vector(feat_dict: dict) -> list:
 AUTOMATED_ACTOR_DAILY_THRESHOLD = 200
 
 # Burst detection parameters — only applied to human-scale actors.
-HUMAN_BURST_MULTIPLIER     = 10   # flag if today is 10x the daily avg
-HUMAN_MAX_DAILY_FOR_BURST  = 500  # skip burst check if avg already high
+HUMAN_BURST_MULTIPLIER    = 10   # flag if today is 10x the daily avg
+HUMAN_MAX_DAILY_FOR_BURST = 500  # skip burst check if avg already high
 
 
 def _is_automated_actor(user: str, daily_avg: float) -> bool:

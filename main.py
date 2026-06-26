@@ -30,6 +30,7 @@ from scorer import score_event, score_batch, get_model_info
 from retrain import retrain
 import llm_engine as llm
 from thresholds import THRESHOLD_HIGH, THRESHOLD_MEDIUM
+from spot_threshold import get_spot_status
 
 app = FastAPI(
     title="K8s Security Anomaly Detection",
@@ -112,6 +113,7 @@ def health():
     return {
         "status":    "ok",
         "model":     get_model_info(),
+        "spot":      get_spot_status(),
         "llm":       llm.get_llm_provider_status(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
@@ -122,6 +124,7 @@ def model_info():
     info = get_model_info()
     if "status" in info and info["status"] == "no model loaded":
         raise HTTPException(503, "No model loaded. Run train.py first.")
+    info["spot"] = get_spot_status()
     return info
 
 
